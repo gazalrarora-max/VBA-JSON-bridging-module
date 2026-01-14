@@ -1,1 +1,41 @@
-Hi
+Sub ExtractAllJSONElements()
+    Dim fso As Object, jsonFile As Object
+    Dim regEx As Object, matches As Object, m As Object
+    Dim jsonText As String, filePath As Variant
+    Dim wsResult As Worksheet
+    Dim row As Long
+
+    ' 1. Select the File
+    filePath = Application.GetOpenFilename("JSON Files (*.json), *.json")
+    If filePath = False Then Exit Sub
+    
+    ' 2. Read File
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set jsonFile = fso.OpenTextFile(filePath, 1)
+    jsonText = jsonFile.ReadAll
+    jsonFile.Close
+
+    ' 3. Create a results sheet
+    Set wsResult = Sheets.Add
+    wsResult.Name = "Extracted_PX_Data"
+    wsResult.Range("A1:B1").Value = Array("JSON Key", "Value")
+    row = 2
+
+    ' 4. Setup RegEx to find ALL "key": "value" pairs
+    Set regEx = CreateObject("VBScript.RegExp")
+    regEx.Global = True
+    regEx.IgnoreCase = True
+    ' This pattern looks for "AnyName" : "AnyValue" or "AnyName" : 123
+    regEx.Pattern = """([^""]+)""\s*:\s*""?([^"",}]+)""?"
+    
+    Set matches = regEx.Execute(jsonText)
+    
+    ' 5. Loop through and print everything found
+    For Each m In matches
+        wsResult.Cells(row, 1).Value = m.SubMatches(0) ' The Key
+        wsResult.Cells(row, 2).Value = m.SubMatches(1) ' The Value
+        row = row + 1
+    Next m
+
+    MsgBox "Found " & row - 2 & " elements!", vbInformation
+End Sub
