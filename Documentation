@@ -1,1 +1,5 @@
-"Defining these paths is a prerequisite that allows the macros to dynamically locate source files and output destinations across your local network or drive."
+Section,Tester Action,Why it matters
+Input Mapping,Fill in Sheet Name & Cell for every header in Column B.,The macro will skip any row where the Sheet/Cell is blank.
+Output Mapping,Define the result cells in Columns G and H.,"This tells the macro which numbers to ""save"" as the expected results."
+Model Prep,Ensure the Calculation Sheet is saved and closed before running.,The macro will open the file path listed on the Dashboard (G7).
+Integrity Check,"Ensure F2 says ""Pass"".","If F2 says ""Error,"" the Run button should be disabled or will fail."
