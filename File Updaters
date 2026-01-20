@@ -1,33 +1,58 @@
-' 1. Logic for picking a specific FILE (Calculation Sheet)
-Sub Update_CS_Path()
-    Dim fd As FileDialog
-    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+Sub Sync_Headers_From_Row5()
+    Dim wsSetup As Worksheet, wsTest As Worksheet
+    Dim lastCol As Long, lastRowSetup As Long, i As Long
+    Dim nextRow As Long
+    Dim colName As String
+    Dim missingHeaders As String
+    Dim hasError As Boolean
     
-    With fd
-        .Title = "Select the Calculation Model File"
-        .AllowMultiSelect = False
-        .Filters.Clear
-        .Filters.Add "Excel Files", "*.xls; *.xlsx; *.xlsm; *.xlsb"
-        If .Show = -1 Then
-            Range("CS_Path").Value = .SelectedItems(1)
-        End If
-    End With
-End Sub
-
-' 2. Logic for picking a FOLDER (Used by the other three buttons)
-Sub PickFolder(TargetCell As String, PromptTitle As String)
-    Dim fd As FileDialog
-    Set fd = Application.FileDialog(msoFileDialogFolderPicker)
+    ' Set sheet references based on your screenshots
+    Set wsSetup = ThisWorkbook.Sheets("Setup")
+    Set wsTest = ThisWorkbook.Sheets("Test_Cases")
     
-    With fd
-        .Title = PromptTitle
-        If .Show = -1 Then
-            Range(TargetCell).Value = .SelectedItems(1)
+    ' --- 1. INTEGRITY CHECK (Row 5) ---
+    ' Check for data in columns that lack a header in Row 5
+    lastCol = wsTest.Cells(5, wsTest.Columns.Count).End(xlToLeft).Column
+    missingHeaders = ""
+    hasError = False
+    
+    ' Iterate through all used columns
+    For i = 1 To wsTest.UsedRange.Columns.Count
+        ' If Header (Row 5) is empty BUT there is data below (Row 6 onwards)
+        If wsTest.Cells(5, i).Value = "" Then
+            If Application.WorksheetFunction.CountA(wsTest.Range(wsTest.Cells(6, i), wsTest.Cells(wsTest.Rows.Count, i))) > 0 Then
+                missingHeaders = missingHeaders & Split(wsTest.Cells(1, i).Address, "$")(1) & ", "
+                hasError = True
+            End If
         End If
-    End With
+    Next i
+    
+    ' Update Status Cell F2
+    If hasError Then
+        wsSetup.Range("F2").Value = "Error: No headers in Row 5 for: " & Left(missingHeaders, Len(missingHeaders) - 2)
+        MsgBox "Integrity Check Failed. Check Cell F2.", vbCritical
+        Exit Sub
+    Else
+        wsSetup.Range("F2").Value = "Pass"
+    End If
+    
+    ' --- 2. CLEAR SETUP COLUMN B (Row 10 Down) ---
+    ' Find the last entry in the Test Case Header column of the Setup sheet
+    lastRowSetup = wsSetup.Cells(wsSetup.Rows.Count, "B").End(xlUp).Row
+    If lastRowSetup >= 10 Then
+        wsSetup.Range("B10:B" & lastRowSetup).ClearContents
+    End If
+    
+    ' --- 3. POPULATE SETUP TABLE ---
+    ' Extract headers from Test_Cases Row 5 and list them in Setup Column B
+    nextRow = 10
+    For i = 1 To lastCol
+        colName = wsTest.Cells(5, i).Value
+        If Trim(colName) <> "" Then
+            wsSetup.Cells(nextRow, 2).Value = colName
+            nextRow = nextRow + 1
+        End If
+    Next i
+    
+    MsgBox "Setup Sync Complete. " & (nextRow - 10) & " headers identified from Row 5.", vbInformation
 End Sub
-
-' 3. Short macros to assign to your Dashboard buttons
-Sub Btn_Update_PXOut():  PickFolder "PXOut_Path", "Select PX Output Folder": End Sub
-Sub Btn_Update_PXTC():   PickFolder "PX_TC", "Select Test Case Folder":    End Sub
-Sub Btn_Update_Ver():    PickFolder "Ver_Path", "Select Report Destination": End Sub
