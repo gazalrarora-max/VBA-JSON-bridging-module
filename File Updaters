@@ -1,0 +1,33 @@
+' 1. Logic for picking a specific FILE (Calculation Sheet)
+Sub Update_CS_Path()
+    Dim fd As FileDialog
+    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    
+    With fd
+        .Title = "Select the Calculation Model File"
+        .AllowMultiSelect = False
+        .Filters.Clear
+        .Filters.Add "Excel Files", "*.xls; *.xlsx; *.xlsm; *.xlsb"
+        If .Show = -1 Then
+            Range("CS_Path").Value = .SelectedItems(1)
+        End If
+    End With
+End Sub
+
+' 2. Logic for picking a FOLDER (Used by the other three buttons)
+Sub PickFolder(TargetCell As String, PromptTitle As String)
+    Dim fd As FileDialog
+    Set fd = Application.FileDialog(msoFileDialogFolderPicker)
+    
+    With fd
+        .Title = PromptTitle
+        If .Show = -1 Then
+            Range(TargetCell).Value = .SelectedItems(1)
+        End If
+    End With
+End Sub
+
+' 3. Short macros to assign to your Dashboard buttons
+Sub Btn_Update_PXOut():  PickFolder "PXOut_Path", "Select PX Output Folder": End Sub
+Sub Btn_Update_PXTC():   PickFolder "PX_TC", "Select Test Case Folder":    End Sub
+Sub Btn_Update_Ver():    PickFolder "Ver_Path", "Select Report Destination": End Sub
