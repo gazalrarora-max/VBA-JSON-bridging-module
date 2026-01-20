@@ -1,1 +1,1 @@
-"Once the Environment Configuration is complete, click the 'Setup Test Cases' button at the top of the Dashboard. This action will automatically navigate you to the Test_Cases sheet.
+"Defining these paths is a prerequisite that allows the macros to dynamically locate source files and output destinations across your local network or drive."
