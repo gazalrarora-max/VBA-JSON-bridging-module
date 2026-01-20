@@ -1,10 +1,1 @@
-Section: Test Case Configuration
-"To ensure the macros process your data accurately, the Test_Cases sheet must be configured according to the following standards:"
-
-Step 1: Header Initialization – Navigate to the Test_Cases sheet and ensure all column headers are defined strictly in Row 5.
-
-Step 2: Data Entry Range – All test case data must begin in Row 6. The automation is programmed to ignore any information above Row 5 or within the header row itself.
-
-Step 3: Test Case Integrity – Adhere to a one-row-per-test-case rule. Each row represents a single unique scenario; do not split one test case across multiple rows, as this will result in processing errors and data confusion.
-
-Step 4: Continuous Data – The macro will loop through every row sequentially until it hits an empty row. Ensure there are no blank rows between your test cases.
+"Once the Environment Configuration is complete, click the 'Setup Test Cases' button at the top of the Dashboard. This action will automatically navigate you to the Test_Cases sheet.
