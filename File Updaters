@@ -1,58 +1,70 @@
-Sub Sync_Headers_From_Row5()
+Sub Sync_Headers_From_Row5_With_Duplicate_Check()
     Dim wsSetup As Worksheet, wsTest As Worksheet
     Dim lastCol As Long, lastRowSetup As Long, i As Long
     Dim nextRow As Long
     Dim colName As String
-    Dim missingHeaders As String
+    Dim missingHeaders As String, duplicateHeaders As String
     Dim hasError As Boolean
+    Dim headerDict As Object
     
-    ' Set sheet references based on your screenshots
     Set wsSetup = ThisWorkbook.Sheets("Setup")
     Set wsTest = ThisWorkbook.Sheets("Test_Cases")
+    Set headerDict = CreateObject("Scripting.Dictionary")
     
-    ' --- 1. INTEGRITY CHECK (Row 5) ---
-    ' Check for data in columns that lack a header in Row 5
+    ' --- 1. INTEGRITY & DUPLICATE CHECK (Row 5) ---
     lastCol = wsTest.Cells(5, wsTest.Columns.Count).End(xlToLeft).Column
     missingHeaders = ""
+    duplicateHeaders = ""
     hasError = False
     
-    ' Iterate through all used columns
-    For i = 1 To wsTest.UsedRange.Columns.Count
-        ' If Header (Row 5) is empty BUT there is data below (Row 6 onwards)
-        If wsTest.Cells(5, i).Value = "" Then
+    For i = 1 To lastCol
+        colName = Trim(wsTest.Cells(5, i).Value)
+        
+        ' Check for Missing Headers where data exists
+        If colName = "" Then
             If Application.WorksheetFunction.CountA(wsTest.Range(wsTest.Cells(6, i), wsTest.Cells(wsTest.Rows.Count, i))) > 0 Then
                 missingHeaders = missingHeaders & Split(wsTest.Cells(1, i).Address, "$")(1) & ", "
                 hasError = True
             End If
+        Else
+            ' Check for Duplicates
+            If headerDict.Exists(colName) Then
+                duplicateHeaders = duplicateHeaders & colName & ", "
+                hasError = True
+            Else
+                headerDict.Add colName, 1
+            End If
         End If
     Next i
     
-    ' Update Status Cell F2
+    ' Update Status Cell F2 and Handle Errors
     If hasError Then
-        wsSetup.Range("F2").Value = "Error: No headers in Row 5 for: " & Left(missingHeaders, Len(missingHeaders) - 2)
-        MsgBox "Integrity Check Failed. Check Cell F2.", vbCritical
+        Dim errorMsg As String
+        If missingHeaders <> "" Then errorMsg = "Missing: " & Left(missingHeaders, Len(missingHeaders) - 2) & ". "
+        If duplicateHeaders <> "" Then errorMsg = errorMsg & "Duplicates: " & Left(duplicateHeaders, Len(duplicateHeaders) - 2)
+        
+        wsSetup.Range("F2").Value = "Error: " & errorMsg
+        MsgBox "Integrity Check Failed: " & errorMsg, vbCritical
         Exit Sub
     Else
         wsSetup.Range("F2").Value = "Pass"
     End If
     
     ' --- 2. CLEAR SETUP COLUMN B (Row 10 Down) ---
-    ' Find the last entry in the Test Case Header column of the Setup sheet
     lastRowSetup = wsSetup.Cells(wsSetup.Rows.Count, "B").End(xlUp).Row
     If lastRowSetup >= 10 Then
         wsSetup.Range("B10:B" & lastRowSetup).ClearContents
     End If
     
     ' --- 3. POPULATE SETUP TABLE ---
-    ' Extract headers from Test_Cases Row 5 and list them in Setup Column B
     nextRow = 10
     For i = 1 To lastCol
-        colName = wsTest.Cells(5, i).Value
-        If Trim(colName) <> "" Then
+        colName = Trim(wsTest.Cells(5, i).Value)
+        If colName <> "" Then
             wsSetup.Cells(nextRow, 2).Value = colName
             nextRow = nextRow + 1
         End If
     Next i
     
-    MsgBox "Setup Sync Complete. " & (nextRow - 10) & " headers identified from Row 5.", vbInformation
+    MsgBox "Setup Sync Complete. " & (nextRow - 10) & " unique headers identified.", vbInformation
 End Sub
