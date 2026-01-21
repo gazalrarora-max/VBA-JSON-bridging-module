@@ -1,10 +1,6 @@
-links = wbOutput.LinkSources(Type:=xlLinkTypeExcelLinks)
-            
-            If Not IsEmpty(links) Then
-                Dim iLink As Long
-                For iLink = 1 To UBound(links)
-                    On Error Resume Next ' Prevent "Invalid Procedure Call" from stopping the macro
-                    wbOutput.BreakLink Name:=CStr(links(iLink)), Type:=xlLinkTypeExcelLinks
-                    On Error GoTo 0 ' Reset error handling
-                Next iLink
-            End If
+' --- REVISED: TC ID LOOP EXIT ---
+        If Len(Trim(tcID)) = 0 Then
+            ' Instead of Exit Sub, we jump out of the loop
+            Exit For 
+        End If
+        ' --------------------------------
