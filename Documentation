@@ -1,38 +1,9 @@
-Phase 1: Mapping your Dashboard
-Based on your image, here is the structure we will use for the VBA code:
+Confirm these three points before execution to ensure the macro runs successfully:
 
-Calculation Sheet Path: Cell G7 (Named Range: CS_Path). This points to the specific Excel File containing your model logic.
+Model Readiness: The Calculation Sheet is fully updated and currently Open to allow the macro to interact with the live workbook.
 
-PX Output Folder: Cell G9 (Named Range: PXOut_Path). This is the Folder where PX saves its raw result files.
+Structural Alignment: The Setup tab mapping and the Test_Cases sheet headers are perfectly aligned to ensure data is pushed to the correct destinations.
 
-Test Case Folder: Cell G11 (Named Range: PX_TC). This is the Folder where the generated PX test scripts will be saved.
+Mapping Completeness: All required Inputs and Outputs for this specific run have been identified and mapped (non-NA) on the Setup tab.
 
-Comparison/Report Path: Cell G13 (Named Range: Ver_Path). This is the Folder where the final Verification Report will be stored.
-
-Phase 2: Expected Results Setup Instructions
-Before running the macro, the tester must manually complete the mapping on the Setup tab to connect the test data to the model.
-
-Step 1: Sync the Headers
-Action: Run the Sync_Headers_From_Row5_With_Duplicate_Check macro.
-
-Result: All unique headers from Row 5 of the Test_Cases sheet are pulled into Column B (starting at Row 10) of the Setup tab.
-
-Validation: Confirm cell F2 says "Pass" (indicating no missing headers or duplicates).
-
-Step 2: Map Inputs (The "Push" Logic)
-For every header listed in Column B, the tester must manually enter:
-
-Column C (Sheet Name): The exact name of the tab in the Calculation Sheet (defined in CS_Path) where this input belongs.
-
-Column D (Cell): The specific cell address (e.g., $B$10) where the value should be pasted.
-
-Logic: The macro will open the model, loop through your test cases, and "push" the data into these specific cells.
-
-Step 3: Map Outputs (The "Pull" Logic)
-On the right side of the Setup tab, the tester defines what results to capture:
-
-Column G (Sheet Name): The tab in the model that contains the final calculated figures.
-
-Column H (Range): The specific cell or range (e.g., $F$20:$G$25) that represents the "Expected Result."
-
-Logic: After the inputs are pushed, the macro will "pull" the data from these cells and save them to the Extracted_PX_Data sheet.
+Pushes test inputs into the model, captures static snapshots of results, and saves them as independent, value-only workbooks in the Verification folder.
