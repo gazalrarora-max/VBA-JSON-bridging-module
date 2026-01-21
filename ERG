@@ -1,0 +1,88 @@
+Sub Run_ExpectedResultsGenerator()
+    Dim wbMain As Workbook, wbCalc As Workbook, wbOutput As Workbook
+    Dim wsDashboard As Worksheet, wsSetup As Worksheet, wsTC As Worksheet
+    Dim csPath As String, verPath As String, folderPath As String
+    Dim lastRowTC As Long, lastRowInput As Long, lastRowOutput As Long
+    Dim i As Long, j As Long, k As Long
+    Dim startTime As Double, endTime As Double
+    Dim tcID As String
+    Dim dictOutputSheets As Object
+    
+    Set wbMain = ThisWorkbook
+    Set wsDashboard = wbMain.Sheets("Dashboard")
+    Set wsSetup = wbMain.Sheets("Setup")
+    Set wsTC = wbMain.Sheets("Test_Cases")
+    Set dictOutputSheets = CreateObject("Scripting.Dictionary")
+    
+    ' 1. Check Pass/Fail status
+    If wsSetup.Range("C7").Value <> "Pass" Then
+        MsgBox "Integrity Check Failed (ER_Check). Please check your Setup mapping.", vbCritical
+        Exit Sub
+    End If
+    
+    ' 2. & 3. Extract paths and create folder
+    csPath = wsDashboard.Range("G7").Value
+    verPath = wsDashboard.Range("G13").Value
+    folderPath = verPath & "\Expected_Results_" & Format(Now, "yyyyMMdd_HHmmss")
+    MkDir folderPath
+    
+    startTime = Timer
+    
+    ' 4. Identify Output Sheets (Unique list)
+    lastRowOutput = wsSetup.Cells(wsSetup.Rows.Count, "G").End(xlUp).Row
+    For i = 10 To lastRowOutput
+        If wsSetup.Cells(i, "G").Value <> "" And wsSetup.Cells(i, "G").Value <> "NA" Then
+            dictOutputSheets(wsSetup.Cells(i, "G").Value) = 1
+        End If
+    Next i
+    
+    ' 6. Open calculation sheet
+    Application.ScreenUpdating = False
+    Set wbCalc = Workbooks.Open(csPath)
+    
+    ' 5. Loop through Test Cases (Row 6 onwards)
+    lastRowTC = wsTC.Cells(wsTC.Rows.Count, "A").End(xlUp).Row
+    lastRowInput = wsSetup.Cells(wsSetup.Rows.Count, "B").End(xlUp).Row
+    
+    For i = 6 To lastRowTC
+        tcID = wsTC.Cells(i, 1).Value
+        Application.StatusBar = "Processing Test Case: " & tcID
+        
+        ' 7. Setup Inputs for this Test Case
+        For j = 10 To lastRowInput
+            Dim headerName As String, sheetDest As String, cellDest As String
+            headerName = wsSetup.Cells(j, "B").Value
+            sheetDest = wsSetup.Cells(j, "C").Value
+            cellDest = wsSetup.Cells(j, "D").Value
+            
+            If sheetDest <> "NA" And sheetDest <> "" Then
+                ' Find column index in Test_Cases for this header
+                Dim colIdx As Long
+                colIdx = wsTC.Rows(5).Find(What:=headerName, LookIn:=xlValues, LookAt:=xlWhole).Column
+                wbCalc.Sheets(sheetDest).Range(cellDest).Value = wsTC.Cells(i, colIdx).Value
+            End If
+        Next j
+        
+        ' 8. Calculate workbook
+        Calculate
+        
+        ' 9. & 10. Copy unique sheets and save
+        Dim sheetNames() As Variant
+        sheetNames = dictOutputSheets.Keys
+        wbCalc.Sheets(sheetNames).Copy
+        Set wbOutput = ActiveWorkbook
+        wbOutput.SaveAs folderPath & "\TC_" & tcID & ".xlsx"
+        wbOutput.Close False
+        
+    Next i
+    
+    ' 13. Completion
+    wbCalc.Close False
+    endTime = Timer
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+    
+    MsgBox "Process Complete!" & vbCrLf & _
+           "Total Test Cases: " & (lastRowTC - 5) & vbCrLf & _
+           "Time Taken: " & Round((endTime - startTime) / 60, 2) & " minutes."
+End Sub
