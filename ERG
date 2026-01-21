@@ -1,42 +1,10 @@
-' 9. & 10. Copy unique sheets, convert to values, and save
-        If dictOutputSheets.Count > 0 Then
-            Dim sheetNames() As String
-            ReDim sheetNames(0 To dictOutputSheets.Count - 1)
-            
-            Dim keyIdx As Long, l As Variant 
-            keyIdx = 0
-            For Each l In dictOutputSheets.Keys
-                sheetNames(keyIdx) = CStr(l)
-                keyIdx = keyIdx + 1
-            Next l
-            
-            ' Copy the specified sheets to a new workbook
-            wbCalc.Sheets(sheetNames).Copy
-            Set wbOutput = ActiveWorkbook
-            
-            ' --- DATA INTEGRITY: CONVERT TO VALUES ---
-            Dim ws As Worksheet
-            For Each ws In wbOutput.Worksheets
-                ' Replace every formula with its static result
-                ws.UsedRange.Value = ws.UsedRange.Value
-            Next ws
-            
-            ' --- DATA INTEGRITY: BREAK EXTERNAL LINKS ---
-            Dim links As Variant
-            links = wbOutput.LinkSources(Type:=xlLinkTypeExcelLinks)
+links = wbOutput.LinkSources(Type:=xlLinkTypeExcelLinks)
             
             If Not IsEmpty(links) Then
                 Dim iLink As Long
                 For iLink = 1 To UBound(links)
-                    wbOutput.BreakLink Name:=links(iLink), Type:=xlLinkTypeExcelLinks
+                    On Error Resume Next ' Prevent "Invalid Procedure Call" from stopping the macro
+                    wbOutput.BreakLink Name:=CStr(links(iLink)), Type:=xlLinkTypeExcelLinks
+                    On Error GoTo 0 ' Reset error handling
                 Next iLink
             End If
-            ' ---------------------------------------------
-
-            ' Save as a self-contained Test Case result file
-            wbOutput.SaveAs folderPath & "\TC_" & tcID & ".xlsx"
-            wbOutput.Close False
-        Else
-            MsgBox "No valid Output Sheets found in Setup tab Column G.", vbExclamation
-            Exit Sub
-        End If
