@@ -1,0 +1,74 @@
+Sub CalibratePXInput_DirectScanFiltered()
+    Dim fso As Object, jsonFile As Object
+    Dim regEx As Object, matches As Object
+    Dim filePath As Variant
+    Dim lineText As String, keyName As String, valName As String
+    Dim wsSetup As Worksheet, wsScript As Worksheet
+    Dim lineCount As Long, outRow As Long
+
+    ' 1. Select the PX JSON File
+    filePath = Application.GetOpenFilename("JSON Files (*.json), *.json", Title:="Select PX JSON File")
+    If filePath = False Then Exit Sub
+
+    Set wsSetup = ThisWorkbook.Sheets("Setup")
+    Set wsScript = ThisWorkbook.Sheets("Script Format")
+    
+    ' 2. Initialize Objects
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set regEx = CreateObject("VBScript.RegExp")
+    
+    regEx.Global = True
+    regEx.IgnoreCase = True
+    ' Pattern: finds "key": "value" or "key": 123
+    regEx.Pattern = """([^""]+)""\s*:\s*""?([^"",{} \s]+)""?"
+
+    ' 3. Prepare Sheets
+    outRow = 10
+    wsSetup.Range("K10:L500").ClearContents
+    wsSetup.Range("N10:N500").ClearContents ' Target Column N for Sample Values
+    wsScript.Cells.Clear
+    
+    ' 4. Read File Line-by-Line
+    Set jsonFile = fso.OpenTextFile(filePath, 1)
+    lineCount = 0
+    
+    Application.ScreenUpdating = False
+    Do Until jsonFile.AtEndOfStream
+        lineCount = lineCount + 1
+        lineText = jsonFile.ReadLine
+        
+        ' Record raw line in the background sheet
+        wsScript.Cells(lineCount, 1).Value = lineText
+        
+        If regEx.Test(lineText) Then
+            Set matches = regEx.Execute(lineText)
+            
+            keyName = matches(0).SubMatches(0)
+            valName = matches(0).SubMatches(1)
+            
+            ' BLACKLIST LOGIC:
+            ' We skip any key that is part of the "Consistent Header" or a system ID
+            ' We skip any value that is "null" or a null set "[]"
+            Select Case LCase(keyName)
+                Case "id", "requestid", "deployment", "version", "name", "runtimeconfiguration"
+                    ' Do nothing, skip these headers
+                Case Else
+                    ' Check if the value is meaningful
+                    If LCase(valName) <> "null" And valName <> "[]" Then
+                        wsSetup.Cells(outRow, 11).Value = keyName   ' Col K: Item
+                        wsSetup.Cells(outRow, 12).Value = lineCount ' Col L: Line Number
+                        wsSetup.Cells(outRow, 14).Value = valName   ' Col N: Sample Value
+                        outRow = outRow + 1
+                    End If
+            End Select
+        End If
+    Loop
+    jsonFile.Close
+    Application.ScreenUpdating = True
+
+    If outRow = 10 Then
+        MsgBox "No valid data items were found.", vbExclamation
+    Else
+        MsgBox "Success! " & (outRow - 10) & " data items found (Headers and Null sets ignored).", vbInformation
+    End If
+End Sub

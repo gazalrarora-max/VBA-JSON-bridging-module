@@ -1,6 +1,0 @@
-' --- REVISED: TC ID LOOP EXIT ---
-        If Len(Trim(tcID)) = 0 Then
-            ' Instead of Exit Sub, we jump out of the loop
-            Exit For 
-        End If
-        ' --------------------------------
