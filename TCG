@@ -2,26 +2,24 @@ Sub Run_PX_TestCaseGenerator_Final()
     Dim wsSetup As Worksheet, wsTC As Worksheet, wsScript As Worksheet
     Dim pxPath As String, i As Long, j As Long, r As Long, tcID As String
     Dim jsonLines() As String, lastRowTC As Long, lastRowSetup As Long
-    Dim targetLine As Long, mappingType As String, finalVal As String, formattedVal As String
+    Dim targetLine As Long, mappingType As String, finalVal As Variant
+    Dim formattedVal As String, currentLineText As String, originalValuePart As String
     
     Set wsSetup = ThisWorkbook.Sheets("Setup")
     Set wsTC = ThisWorkbook.Sheets("Test_Cases")
     Set wsScript = ThisWorkbook.Sheets("Script Format")
     
-    ' 1. Integrity Check
     If wsSetup.Range("SG_Check").Value <> "Pass" Then
         MsgBox "Integrity Check Failed (SG_Check).", vbCritical
         Exit Sub
     End If
     
-    ' 2. Path from Dashboard G11 (Named Range PX_TC)
     pxPath = ThisWorkbook.Sheets("Dashboard").Range("PX_TC").Value
     If Right(pxPath, 1) <> "\" Then pxPath = pxPath & "\"
     
     lastRowTC = wsTC.Cells(wsTC.Rows.Count, "A").End(xlUp).Row
     lastRowSetup = wsSetup.Cells(wsSetup.Rows.Count, "K").End(xlUp).Row
     
-    ' 3. Outer Loop: Test Cases
     For i = 6 To lastRowTC
         tcID = wsTC.Cells(i, 1).Value
         If Len(Trim(tcID)) = 0 Then Exit For
@@ -36,56 +34,47 @@ Sub Run_PX_TestCaseGenerator_Final()
         
         Application.StatusBar = "Processing PX TC: " & tcID
         
-        ' 4. Inner Loop: Setup Row-by-Row Mapping (Column L for Line No)
         For j = 10 To lastRowSetup
-            targetLine = Val(wsSetup.Cells(j, "L").Value) ' Line Number from Column L
-            mappingType = wsSetup.Cells(j, "M").Value      ' Mapping (Dynamic Header / Fixed Value / null)
+            targetLine = Val(wsSetup.Cells(j, "L").Value)
+            mappingType = wsSetup.Cells(j, "M").Value
             
-            ' Only edit if Line Number is valid and mapping isn't "null"
             If targetLine > 0 And targetLine <= lastRowScript And mappingType <> "null" Then
-                
-                ' Determine the Value to use
+                ' Determine Raw Value from TC or Fixed column
                 If mappingType = "Fixed Value" Then
-                    finalVal = wsSetup.Cells(j, "N").Value ' Value from Sample Value column
+                    finalVal = wsSetup.Cells(j, "N").Value
                 Else
                     Dim colIdx As Variant
-                    ' Header name is in Column M
                     colIdx = Application.Match(wsSetup.Cells(j, "M").Value, wsTC.Rows(5), 0)
-                    If Not IsError(colIdx) Then
-                        finalVal = wsTC.Cells(i, colIdx).Value
-                    Else
-                        finalVal = "" ' Fallback if header not found
-                    End If
+                    If Not IsError(colIdx) Then finalVal = wsTC.Cells(i, colIdx).Value Else finalVal = ""
                 End If
-                
-                ' Only update if we actually have a value to push
-                If Len(Trim(finalVal)) > 0 Then
-                    ' JSON Formatting
-                    If IsNumeric(finalVal) Or finalVal = "true" Or finalVal = "false" Or finalVal = "null" Then
-                        formattedVal = finalVal
-                    Else
+
+                ' DETECT TEMPLATE TYPE
+                currentLineText = jsonLines(targetLine)
+                If InStr(1, currentLineText, ":") > 0 Then
+                    Dim prefix As String, suffix As String
+                    prefix = Left(currentLineText, InStr(1, currentLineText, ":"))
+                    suffix = IIf(Right(Trim(currentLineText), 1) = ",", ",", "")
+                    
+                    ' Extract the value part from the template to check for quotes
+                    originalValuePart = Trim(Mid(currentLineText, InStr(1, currentLineText, ":") + 1))
+                    If Right(originalValuePart, 1) = "," Then originalValuePart = Left(originalValuePart, Len(originalValuePart) - 1)
+                    originalValuePart = Trim(originalValuePart)
+
+                    ' If original has quotes, add quotes to new value. Else, leave raw.
+                    If Left(originalValuePart, 1) = """" Then
                         formattedVal = """" & finalVal & """"
+                    Else
+                        ' Handle potential empty/null cases for literal fields
+                        If Len(Trim(CStr(finalVal))) = 0 Then formattedVal = "null" Else formattedVal = Trim(CStr(finalVal))
                     End If
                     
-                    ' SURGICAL EDIT: Target the specific line
-                    Dim currentLineText As String
-                    currentLineText = jsonLines(targetLine)
-                    
-                    If InStr(1, currentLineText, ":") > 0 Then
-                        Dim prefix As String, suffix As String
-                        ' Extract key up to the colon
-                        prefix = Left(currentLineText, InStr(1, currentLineText, ":"))
-                        ' Maintain trailing comma if it existed
-                        suffix = IIf(Right(Trim(currentLineText), 1) = ",", ",", "")
-                        
-                        ' Update the line in the array
-                        jsonLines(targetLine) = prefix & " " & formattedVal & suffix
-                    End If
+                    ' Update line
+                    jsonLines(targetLine) = prefix & " " & formattedVal & suffix
                 End If
             End If
         Next j
         
-        ' 5. Save the final JSON file
+        ' Save file
         Dim fileNum As Integer: fileNum = FreeFile
         Open pxPath & "TC_" & tcID & ".json" For Output As #fileNum
         For r = 1 To lastRowScript
@@ -95,5 +84,5 @@ Sub Run_PX_TestCaseGenerator_Final()
     Next i
     
     Application.StatusBar = False
-    MsgBox "PX Generation Complete! Total: " & (i - 6) & " files generated in " & pxPath
+    MsgBox "PX Generation Complete! Success for " & (i - 6) & " cases."
 End Sub
