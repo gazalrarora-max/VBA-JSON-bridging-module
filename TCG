@@ -1,70 +1,99 @@
-Sub CalibratePXInput_ExactText()
-    Dim fso As Object, jsonFile As Object
-    Dim regEx As Object, matches As Object
-    Dim filePath As Variant
-    Dim lineText As String, keyName As String, valName As String
-    Dim wsSetup As Worksheet, wsScript As Worksheet
-    Dim lineCount As Long, outRow As Long
-
-    ' 1. Select the PX JSON File
-    filePath = Application.GetOpenFilename("JSON Files (*.json), *.json", Title:="Select PX JSON File")
-    If filePath = False Then Exit Sub 
-
+Sub Run_PX_TestCaseGenerator_Final()
+    Dim wsSetup As Worksheet, wsTC As Worksheet, wsScript As Worksheet
+    Dim pxPath As String, i As Long, j As Long, r As Long, tcID As String
+    Dim jsonLines() As String, lastRowTC As Long, lastRowSetup As Long
+    Dim targetLine As Long, mappingType As String, finalVal As String, formattedVal As String
+    
     Set wsSetup = ThisWorkbook.Sheets("Setup")
+    Set wsTC = ThisWorkbook.Sheets("Test_Cases")
     Set wsScript = ThisWorkbook.Sheets("Script Format")
     
-    ' 2. PREVENT AUTO-FORMATTING: Force Columns to Text
-    ' Column K (Item), L (Line), and N (Sample Value)
-    wsSetup.Range("K:K,L:L,N:N").NumberFormat = "@"
+    ' 1. Integrity Check
+    If wsSetup.Range("SG_Check").Value <> "Pass" Then
+        MsgBox "Integrity Check Failed (SG_Check).", vbCritical
+        Exit Sub
+    End If
     
-    ' 3. Initialize Objects
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set regEx = CreateObject("VBScript.RegExp")
+    ' 2. Path from Dashboard G11 (Named Range PX_TC)
+    pxPath = ThisWorkbook.Sheets("Dashboard").Range("PX_TC").Value
+    If Right(pxPath, 1) <> "\" Then pxPath = pxPath & "\"
     
-    regEx.Global = True
-    regEx.IgnoreCase = True
-    regEx.Pattern = """([^""]+)""\s*:\s*""?([^"",{} \s]+)""?"
-
-    ' 4. Prepare Sheets
-    outRow = 10
-    wsSetup.Range("K10:L500").ClearContents
-    wsSetup.Range("N10:N500").ClearContents 
-    wsScript.Cells.Clear 
+    lastRowTC = wsTC.Cells(wsTC.Rows.Count, "A").End(xlUp).Row
+    lastRowSetup = wsSetup.Cells(wsSetup.Rows.Count, "K").End(xlUp).Row
     
-    ' 5. Read File Line-by-Line
-    Set jsonFile = fso.OpenTextFile(filePath, 1) 
-    lineCount = 0
-    
-    Application.ScreenUpdating = False
-    Do Until jsonFile.AtEndOfStream
-        lineCount = lineCount + 1
-        lineText = jsonFile.ReadLine
+    ' 3. Outer Loop: Test Cases
+    For i = 6 To lastRowTC
+        tcID = wsTC.Cells(i, 1).Value
+        If Len(Trim(tcID)) = 0 Then Exit For
         
-        ' Store raw line in reference sheet (also forced to Text)
-        wsScript.Cells(lineCount, 1).NumberFormat = "@"
-        wsScript.Cells(lineCount, 1).Value = lineText
+        ' Load fresh template into an array
+        Dim lastRowScript As Long
+        lastRowScript = wsScript.Cells(wsScript.Rows.Count, "A").End(xlUp).Row
+        ReDim jsonLines(1 To lastRowScript)
+        For r = 1 To lastRowScript
+            jsonLines(r) = wsScript.Cells(r, 1).Value
+        Next r
         
-        If regEx.Test(lineText) Then
-            Set matches = regEx.Execute(lineText)
-            keyName = matches(0).SubMatches(0)
-            valName = matches(0).SubMatches(1)
+        Application.StatusBar = "Processing PX TC: " & tcID
+        
+        ' 4. Inner Loop: Setup Row-by-Row Mapping (Column L for Line No)
+        For j = 10 To lastRowSetup
+            targetLine = Val(wsSetup.Cells(j, "L").Value) ' Line Number from Column L
+            mappingType = wsSetup.Cells(j, "M").Value      ' Mapping (Dynamic Header / Fixed Value / null)
             
-            ' Filter headers and null sets
-            Select Case LCase(keyName)
-                Case "id", "requestid", "deployment", "version", "name", "runtimeconfiguration"
-                    ' Skip metadata
-                Case Else
-                    If LCase(valName) <> "null" And valName <> "[]" Then
-                        wsSetup.Cells(outRow, 11).Value = keyName   ' Col K
-                        wsSetup.Cells(outRow, 12).Value = lineCount ' Col L
-                        wsSetup.Cells(outRow, 14).Value = valName   ' Col N: Sample Value
-                        outRow = outRow + 1
+            ' Only edit if Line Number is valid and mapping isn't "null"
+            If targetLine > 0 And targetLine <= lastRowScript And mappingType <> "null" Then
+                
+                ' Determine the Value to use
+                If mappingType = "Fixed Value" Then
+                    finalVal = wsSetup.Cells(j, "N").Value ' Value from Sample Value column
+                Else
+                    Dim colIdx As Variant
+                    ' Header name is in Column M
+                    colIdx = Application.Match(wsSetup.Cells(j, "M").Value, wsTC.Rows(5), 0)
+                    If Not IsError(colIdx) Then
+                        finalVal = wsTC.Cells(i, colIdx).Value
+                    Else
+                        finalVal = "" ' Fallback if header not found
                     End If
-            End Select
-        End If
-    Loop
-    jsonFile.Close
-    Application.ScreenUpdating = True
-
-    MsgBox "Extraction Complete. Data forced to Text format to prevent auto-conversion.", vbInformation
+                End If
+                
+                ' Only update if we actually have a value to push
+                If Len(Trim(finalVal)) > 0 Then
+                    ' JSON Formatting
+                    If IsNumeric(finalVal) Or finalVal = "true" Or finalVal = "false" Or finalVal = "null" Then
+                        formattedVal = finalVal
+                    Else
+                        formattedVal = """" & finalVal & """"
+                    End If
+                    
+                    ' SURGICAL EDIT: Target the specific line
+                    Dim currentLineText As String
+                    currentLineText = jsonLines(targetLine)
+                    
+                    If InStr(1, currentLineText, ":") > 0 Then
+                        Dim prefix As String, suffix As String
+                        ' Extract key up to the colon
+                        prefix = Left(currentLineText, InStr(1, currentLineText, ":"))
+                        ' Maintain trailing comma if it existed
+                        suffix = IIf(Right(Trim(currentLineText), 1) = ",", ",", "")
+                        
+                        ' Update the line in the array
+                        jsonLines(targetLine) = prefix & " " & formattedVal & suffix
+                    End If
+                End If
+            End If
+        Next j
+        
+        ' 5. Save the final JSON file
+        Dim fileNum As Integer: fileNum = FreeFile
+        Open pxPath & "TC_" & tcID & ".json" For Output As #fileNum
+        For r = 1 To lastRowScript
+            Print #fileNum, jsonLines(r)
+        Next r
+        Close #fileNum
+    Next i
+    
+    Application.StatusBar = False
+    MsgBox "PX Generation Complete! Total: " & (i - 6) & " files generated in " & pxPath
 End Sub
