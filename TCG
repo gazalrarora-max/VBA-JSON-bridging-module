@@ -1,88 +1,166 @@
-Sub Run_PX_TestCaseGenerator_Final()
-    Dim wsSetup As Worksheet, wsTC As Worksheet, wsScript As Worksheet
-    Dim pxPath As String, i As Long, j As Long, r As Long, tcID As String
-    Dim jsonLines() As String, lastRowTC As Long, lastRowSetup As Long
-    Dim targetLine As Long, mappingType As String, finalVal As Variant
-    Dim formattedVal As String, currentLineText As String, originalValuePart As String
+Sub Head_Macro_Upload_PX_Outputs()
+    Dim wsSetup As Worksheet: Set wsSetup = ThisWorkbook.Sheets("Setup")
+    Dim fd As FileDialog: Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    Dim jsonText As String, fso As Object, jsonFile As Object
+    Dim nextRow As Long: nextRow = 10
     
-    Set wsSetup = ThisWorkbook.Sheets("Setup")
-    Set wsTC = ThisWorkbook.Sheets("Test_Cases")
-    Set wsScript = ThisWorkbook.Sheets("Script Format")
+    ' 1. Select the Sample JSON Output
+    With fd
+        .Title = "Select Sample PX Output JSON"
+        If .Show = -1 Then
+            Set fso = CreateObject("Scripting.FileSystemObject")
+            Set jsonFile = fso.OpenTextFile(.SelectedItems(1), 1)
+            jsonText = jsonFile.ReadAll: jsonFile.Close
+        Else: Exit Sub
+        End If
+    End With
+
+    ' 2. Clear Columns R, S, and T (Rows 10+)
+    wsSetup.Range("R10:T" & wsSetup.Rows.Count).ClearContents
+    Application.ScreenUpdating = False
+
+    ' 3. Call All Workers in sequence
+    Call Worker1_Scan_Direct_Vectors(jsonText, nextRow)
+    Call Worker2_Scan_Vectors_In_Vectors(jsonText, nextRow)
+    Call Worker3_Scan_Time_Dependent_Vectors(jsonText, nextRow)
+
+    Application.ScreenUpdating = True
+    MsgBox "PX Output List Fully Updated! Total: " & (nextRow - 10) & " items found.", vbInformation
+End Sub
+
+Sub Worker1_Scan_Direct_Vectors(ByVal json As String, ByRef nextRow As Long)
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    Dim ws As Worksheet: Set ws = Sheets("Setup")
+    Dim matches As Object, subMatches As Object, m As Object, sm As Object
     
-    If wsSetup.Range("SG_Check").Value <> "Pass" Then
-        MsgBox "Integrity Check Failed (SG_Check).", vbCritical
-        Exit Sub
+    ' Pattern: Look for "getOutput" followed by the VERY FIRST "vectors" array
+    ' The [^\]]*? ensures we stop at the first closing bracket of the array
+    regEx.Pattern = """getOutput""\s*:\s*\{[\s\S]*?""vectors""\s*:\s*\[([\s\S]*?)\]"
+    regEx.Global = False
+    regEx.IgnoreCase = True
+    
+    Set matches = regEx.Execute(json)
+    
+    If matches.Count > 0 Then
+        Dim vectorBlock As String: vectorBlock = matches(0).subMatches(0)
+        
+        ' Secondary Regex: Extract all "name" values from this specific block
+        Dim nameReg As Object: Set nameReg = CreateObject("VBScript.RegExp")
+        nameReg.Pattern = """name""\s*:\s*""([^""]+)"""
+        nameReg.Global = True
+        
+        Set subMatches = nameReg.Execute(vectorBlock)
+        
+        ' 4. Populate Excel
+        If subMatches.Count > 0 Then
+            For Each sm In subMatches
+                ws.Cells(nextRow, "R").Value = sm.subMatches(0) ' PX output
+                ws.Cells(nextRow, "S").Value = "vectors"         ' output type
+                ws.Cells(nextRow, "T").Value = "None"            ' parent
+                nextRow = nextRow + 1
+            Next
+        End If
     End If
+End Sub
+
+Sub Worker2_Scan_Vectors_In_Vectors(ByVal json As String, ByRef nextRow As Long)
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    Dim ws As Worksheet: Set ws = Sheets("Setup")
+    Dim matches As Object, parentMatches As Object, pMatch As Object
     
-    pxPath = ThisWorkbook.Sheets("Dashboard").Range("PX_TC").Value
-    If Right(pxPath, 1) <> "\" Then pxPath = pxPath & "\"
+    ' Pattern: Isolate the entire vectorsInVectors array [cite: 14, 18]
+    regEx.Pattern = """vectorsInVectors""\s*:\s*\[([\s\S]*?)\]\s*(?=\s*""\w+""\s*:|\s*\}\s*\})"
+    regEx.Global = False
+    regEx.IgnoreCase = True
     
-    lastRowTC = wsTC.Cells(wsTC.Rows.Count, "A").End(xlUp).Row
-    lastRowSetup = wsSetup.Cells(wsSetup.Rows.Count, "K").End(xlUp).Row
+    Set matches = regEx.Execute(json)
     
-    For i = 6 To lastRowTC
-        tcID = wsTC.Cells(i, 1).Value
-        If Len(Trim(tcID)) = 0 Then Exit For
+    If matches.Count > 0 Then
+        Dim vivBlock As String: vivBlock = matches(0).subMatches(0)
         
-        ' Load fresh template into an array
-        Dim lastRowScript As Long
-        lastRowScript = wsScript.Cells(wsScript.Rows.Count, "A").End(xlUp).Row
-        ReDim jsonLines(1 To lastRowScript)
-        For r = 1 To lastRowScript
-            jsonLines(r) = wsScript.Cells(r, 1).Value
-        Next r
+        ' Secondary Regex: Find each Parent Group and its nested vectors array
+        Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
+        regExParent.Pattern = "\{\s*""name""\s*:\s*""([^""]+)""[\s\S]*?""vectors""\s*:\s*\[([\s\S]*?)\]\s*\}"
+        regExParent.Global = True
         
-        Application.StatusBar = "Processing PX TC: " & tcID
+        Set parentMatches = regExParent.Execute(vivBlock)
         
-        For j = 10 To lastRowSetup
-            targetLine = Val(wsSetup.Cells(j, "L").Value)
-            mappingType = wsSetup.Cells(j, "M").Value
+        For Each pMatch In parentMatches
+            Dim groupParentName As String: groupParentName = pMatch.subMatches(0) ' e.g., policyInformation_1 UL2022 [cite: 15]
+            Dim innerVectorText As String: innerVectorText = pMatch.subMatches(1)
             
-            If targetLine > 0 And targetLine <= lastRowScript And mappingType <> "null" Then
-                ' Determine Raw Value from TC or Fixed column
-                If mappingType = "Fixed Value" Then
-                    finalVal = wsSetup.Cells(j, "N").Value
-                Else
-                    Dim colIdx As Variant
-                    colIdx = Application.Match(wsSetup.Cells(j, "M").Value, wsTC.Rows(5), 0)
-                    If Not IsError(colIdx) Then finalVal = wsTC.Cells(i, colIdx).Value Else finalVal = ""
-                End If
-
-                ' DETECT TEMPLATE TYPE
-                currentLineText = jsonLines(targetLine)
-                If InStr(1, currentLineText, ":") > 0 Then
-                    Dim prefix As String, suffix As String
-                    prefix = Left(currentLineText, InStr(1, currentLineText, ":"))
-                    suffix = IIf(Right(Trim(currentLineText), 1) = ",", ",", "")
-                    
-                    ' Extract the value part from the template to check for quotes
-                    originalValuePart = Trim(Mid(currentLineText, InStr(1, currentLineText, ":") + 1))
-                    If Right(originalValuePart, 1) = "," Then originalValuePart = Left(originalValuePart, Len(originalValuePart) - 1)
-                    originalValuePart = Trim(originalValuePart)
-
-                    ' If original has quotes, add quotes to new value. Else, leave raw.
-                    If Left(originalValuePart, 1) = """" Then
-                        formattedVal = """" & finalVal & """"
-                    Else
-                        ' Handle potential empty/null cases for literal fields
-                        If Len(Trim(CStr(finalVal))) = 0 Then formattedVal = "null" Else formattedVal = Trim(CStr(finalVal))
-                    End If
-                    
-                    ' Update line
-                    jsonLines(targetLine) = prefix & " " & formattedVal & suffix
-                End If
-            End If
-        Next j
-        
-        ' Save file
-        Dim fileNum As Integer: fileNum = FreeFile
-        Open pxPath & "TC_" & tcID & ".json" For Output As #fileNum
-        For r = 1 To lastRowScript
-            Print #fileNum, jsonLines(r)
-        Next r
-        Close #fileNum
-    Next i
+            ' Tertiary Regex: Extract individual child names
+            Dim regExChild As Object: Set regExChild = CreateObject("VBScript.RegExp")
+            regExChild.Pattern = """name""\s*:\s*""([^""]+)"""
+            regExChild.Global = True
+            
+            Dim childNames As Object: Set childNames = regExChild.Execute(innerVectorText)
+            Dim cMatch As Object
+            
+            For Each cMatch In childNames
+                ws.Cells(nextRow, "R").Value = cMatch.subMatches(0)        ' PX output [cite: 15]
+                ws.Cells(nextRow, "S").Value = "vectorsInVectors"        ' output type
+                ws.Cells(nextRow, "T").Value = groupParentName           ' OutputParent [cite: 15]
+                nextRow = nextRow + 1
+            Next
+        Next
+    End If
+End Sub
+Sub Worker3_Scan_Time_Dependent_Vectors(ByVal json As String, ByRef nextRow As Long)
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    Dim ws As Worksheet: Set ws = Sheets("Setup")
+    Dim matches As Object, parentMatches As Object, pxMatches As Object
+    Dim tdvBlock As String, segmentText As String
+    Dim i As Long, j As Long, startPos As Long, endPos As Long
     
-    Application.StatusBar = False
-    MsgBox "PX Generation Complete! Success for " & (i - 6) & " cases."
+    ' 1. Isolate the entire timeDependentVectors (TDV) array
+    ' Anchor strictly between the TDV key and the frequencyDependentVectors key
+    regEx.Pattern = """timeDependentVectors""\s*:\s*\[([\s\S]*?)\]\s*,\s*""frequencyDependentVectors"""
+    regEx.Global = False
+    regEx.IgnoreCase = True
+    
+    Set matches = regEx.Execute(json)
+    
+    If matches.Count > 0 Then
+        tdvBlock = matches(0).subMatches(0)
+        
+        ' 2. Identify all Group Header (Parent) Positions within the TDV block
+        Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
+        ' Specifically targets group headers like "benefitIllustration"
+        regExParent.Pattern = """name""\s*:\s*""([^""]+)""\s*,\s*""vectors""\s*:\s*\["
+        regExParent.Global = True
+        Set parentMatches = regExParent.Execute(tdvBlock)
+        
+        ' 3. Slice the TDV block into segments and extract children
+        For i = 0 To parentMatches.Count - 1
+            Dim groupName As String: groupName = parentMatches(i).subMatches(0)
+            
+            [cite_start] ' Determine the slice boundaries to prevent missing data like asset value [cite: 8, 12]
+            startPos = parentMatches(i).FirstIndex
+            If i < parentMatches.Count - 1 Then
+                endPos = parentMatches(i + 1).FirstIndex
+            Else
+                endPos = Len(tdvBlock)
+            End If
+            
+            ' Extract the segment containing all internal variables for this specific parent
+            segmentText = Mid(tdvBlock, startPos + 1, endPos - startPos)
+            
+            ' Secondary extraction: Find all "name" elements within this slice
+            Dim regExPX As Object: Set regExPX = CreateObject("VBScript.RegExp")
+            regExPX.Pattern = """name""\s*:\s*""([^""]+)"""
+            regExPX.Global = True
+            Set pxMatches = regExPX.Execute(segmentText)
+            
+            ' Populate Excel starting from index 1 (index 0 is the parent name itself)
+            If pxMatches.Count > 1 Then
+                For j = 1 To pxMatches.Count - 1
+                    ws.Cells(nextRow, "R").Value = pxMatches(j).subMatches(0) ' PX output
+                    ws.Cells(nextRow, "S").Value = "timeDependentVectors"     ' output type
+                    ws.Cells(nextRow, "T").Value = groupName                 ' OutputParent
+                    nextRow = nextRow + 1
+                Next
+            End If
+        Next
+    End If
 End Sub
