@@ -1,14 +1,14 @@
-Sub TDV_Segmented_Extraction_Test_Final()
+Sub Slice_Entire_TDVIV()
     Dim fd As FileDialog: Set fd = Application.FileDialog(msoFileDialogFilePicker)
-    Dim jsonText As String, tdvBlock As String
+    Dim jsonText As String, tdvivBlock As String
     Dim fso As Object, jsonFile As Object
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
     Dim matches As Object, parentMatches As Object
-    Dim i As Long, j As Long, startPos As Long, endPos As Long
+    Dim i As Long, startPos As Long, endPos As Long
     
     ' 1. Select and Read the JSON File
     With fd
-        .Title = "Select PX Output JSON"
+        .Title = "Select PX Output JSON (Output 4 Structure)"
         If .Show = -1 Then
             Set fso = CreateObject("Scripting.FileSystemObject")
             Set jsonFile = fso.OpenTextFile(.SelectedItems(1), 1)
@@ -17,61 +17,48 @@ Sub TDV_Segmented_Extraction_Test_Final()
         End If
     End With
 
-    ' --- STEP 1: Extract all data in "timeDependentVectors" ---
-    ' Greedy capture ensures variables at the end of the file are not missed
-    regEx.Pattern = """timeDependentVectors""\s*:\s*\[([\s\S]+)\]"
+    ' --- STEP 1: Isolate the TDVIV Block ---
+    ' Targets the final segment "timeDependentVectorInVectors"
+    ' Greedy capture ensures variables at the very end are included
+    regEx.Pattern = """timeDependentVectorInVectors""\s*:\s*\[([\s\S]+)\]"
     regEx.Global = False
     regEx.IgnoreCase = True
     Set matches = regEx.Execute(jsonText)
     
     If matches.Count > 0 Then
-        tdvBlock = matches(0).subMatches(0)
+        tdvivBlock = matches(0).subMatches(0)
+        Debug.Print "=== TDVIV RAW BLOCK ISOLATED ==="
         
-        ' --- STEP 2: Find Position of each Group Name ---
+        ' --- STEP 2: Find Group Name Positions ---
         Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
-        ' Pattern for the Group Names (Output Parents)
         regExParent.Pattern = """name""\s*:\s*""([^""]+)""\s*,\s*""vectors""\s*:\s*\["
         regExParent.Global = True
-        Set parentMatches = regExParent.Execute(tdvBlock)
+        Set parentMatches = regExParent.Execute(tdvivBlock)
         
-        Debug.Print "=== FINAL SEGMENTED EXTRACTION TEST ==="
-        
-        ' --- STEP 3: Slice Segments and Extract PX Outputs ---
+        ' --- STEP 3: Slice and Print Segments ---
         For i = 0 To parentMatches.Count - 1
             Dim groupName As String: groupName = parentMatches(i).subMatches(0)
             
-            ' Determine slice boundaries
+            ' Determine slice boundaries using FirstIndex
             startPos = parentMatches(i).FirstIndex
             If i < parentMatches.Count - 1 Then
                 endPos = parentMatches(i + 1).FirstIndex
             Else
-                ' Final segment (like surrenderIllustration) slice
-                endPos = Len(tdvBlock)
+                endPos = Len(tdvivBlock)
             End If
             
             ' Extract the raw segment text
             Dim segmentText As String
-            segmentText = Mid(tdvBlock, startPos + 1, endPos - startPos)
+            segmentText = Mid(tdvivBlock, startPos + 1, endPos - startPos)
             
             Debug.Print "----------------------------------------------------"
-            Debug.Print "OUTPUT PARENT: " & groupName
-            
-            ' Find all variable names (PX Outputs) inside this specific slice
-            Dim regExPX As Object: Set regExPX = CreateObject("VBScript.RegExp")
-            regExPX.Pattern = """name""\s*:\s*""([^""]+)"""
-            regExPX.Global = True
-            
-            Dim pxMatches As Object: Set pxMatches = regExPX.Execute(segmentText)
-            
-            ' Skip the first match because it is the group name itself
-            If pxMatches.Count > 1 Then
-                For j = 1 To pxMatches.Count - 1
-                    ' This correctly captures "asset value" and other nested variables
-                    Debug.Print "   -> PX OUTPUT: " & pxMatches(j).subMatches(0)
-                Next
-            End If
+            Debug.Print "SEGMENT PARENT: " & groupName
+            Debug.Print "SEGMENT DATA:"
+            Debug.Print segmentText
         Next
         
-        MsgBox "Extraction Complete! Check Immediate Window (Ctrl+G) for verification.", vbInformation
+        MsgBox "TDVIV Segmented! Check the Immediate Window (Ctrl+G).", vbInformation
+    Else
+        MsgBox "Could not find the 'timeDependentVectorInVectors' segment.", vbCritical
     End If
 End Sub
