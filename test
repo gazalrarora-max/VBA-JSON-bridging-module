@@ -1,45 +1,77 @@
-Sub ExtractPXNestedElements()
+Sub TDV_Segmented_Extraction_Test_Final()
+    Dim fd As FileDialog: Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    Dim jsonText As String, tdvBlock As String
     Dim fso As Object, jsonFile As Object
-    Dim regEx As Object, matches As Object
-    Dim jsonText As String, filePath As Variant
-    Dim wsMapping As Worksheet
-    Dim lastRow As Long, i As Long
-    Dim targetName As String, pattern As String
-
-    Set wsMapping = ThisWorkbook.Sheets("Mapping")
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    Dim matches As Object, parentMatches As Object
+    Dim i As Long, j As Long, startPos As Long, endPos As Long
     
-    ' 1. Select the JSON file
-    filePath = Application.GetOpenFilename("JSON Files (*.json), *.json")
-    If filePath = False Then Exit Sub
-    
-    ' 2. Read File
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set jsonFile = fso.OpenTextFile(filePath, 1)
-    jsonText = jsonFile.ReadAll
-    jsonFile.Close
+    ' 1. Select and Read the JSON File
+    With fd
+        .Title = "Select PX Output JSON"
+        If .Show = -1 Then
+            Set fso = CreateObject("Scripting.FileSystemObject")
+            Set jsonFile = fso.OpenTextFile(.SelectedItems(1), 1)
+            jsonText = jsonFile.ReadAll: jsonFile.Close
+        Else: Exit Sub
+        End If
+    End With
 
-    ' 3. Setup RegEx
-    Set regEx = CreateObject("VBScript.RegExp")
+    ' --- STEP 1: Extract all data in "timeDependentVectors" ---
+    ' Greedy capture ensures variables at the end of the file are not missed
+    regEx.Pattern = """timeDependentVectors""\s*:\s*\[([\s\S]+)\]"
     regEx.Global = False
     regEx.IgnoreCase = True
+    Set matches = regEx.Execute(jsonText)
     
-    lastRow = wsMapping.Cells(wsMapping.Rows.Count, "A").End(xlUp).Row
-    
-    ' 4. Loop through Column A (e.g., "annualPremium", "sumAssured")
-    For i = 2 To lastRow
-        targetName = wsMapping.Cells(i, 1).Value
+    If matches.Count > 0 Then
+        tdvBlock = matches(0).subMatches(0)
         
-        ' This advanced pattern finds the NAME and then looks ahead 
-        ' for the very next VALUE regardless of line breaks.
-        regEx.Pattern = """name""\s*:\s*""" & targetName & """[\s\S]*?""value""\s*:\s*""?([^"",}]+)""?"
+        ' --- STEP 2: Find Position of each Group Name ---
+        Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
+        ' Pattern for the Group Names (Output Parents)
+        regExParent.Pattern = """name""\s*:\s*""([^""]+)""\s*,\s*""vectors""\s*:\s*\["
+        regExParent.Global = True
+        Set parentMatches = regExParent.Execute(tdvBlock)
         
-        If regEx.Test(jsonText) Then
-            Set matches = regEx.Execute(jsonText)
-            wsMapping.Cells(i, 2).Value = Trim(matches(0).SubMatches(0))
-        Else
-            wsMapping.Cells(i, 2).Value = "NOT FOUND"
-        End If
-    Next i
-    
-    MsgBox "Extraction Complete for " & lastRow - 1 & " elements!", vbInformation
+        Debug.Print "=== FINAL SEGMENTED EXTRACTION TEST ==="
+        
+        ' --- STEP 3: Slice Segments and Extract PX Outputs ---
+        For i = 0 To parentMatches.Count - 1
+            Dim groupName As String: groupName = parentMatches(i).subMatches(0)
+            
+            ' Determine slice boundaries
+            startPos = parentMatches(i).FirstIndex
+            If i < parentMatches.Count - 1 Then
+                endPos = parentMatches(i + 1).FirstIndex
+            Else
+                ' Final segment (like surrenderIllustration) slice
+                endPos = Len(tdvBlock)
+            End If
+            
+            ' Extract the raw segment text
+            Dim segmentText As String
+            segmentText = Mid(tdvBlock, startPos + 1, endPos - startPos)
+            
+            Debug.Print "----------------------------------------------------"
+            Debug.Print "OUTPUT PARENT: " & groupName
+            
+            ' Find all variable names (PX Outputs) inside this specific slice
+            Dim regExPX As Object: Set regExPX = CreateObject("VBScript.RegExp")
+            regExPX.Pattern = """name""\s*:\s*""([^""]+)"""
+            regExPX.Global = True
+            
+            Dim pxMatches As Object: Set pxMatches = regExPX.Execute(segmentText)
+            
+            ' Skip the first match because it is the group name itself
+            If pxMatches.Count > 1 Then
+                For j = 1 To pxMatches.Count - 1
+                    ' This correctly captures "asset value" and other nested variables
+                    Debug.Print "   -> PX OUTPUT: " & pxMatches(j).subMatches(0)
+                Next
+            End If
+        Next
+        
+        MsgBox "Extraction Complete! Check Immediate Window (Ctrl+G) for verification.", vbInformation
+    End If
 End Sub
