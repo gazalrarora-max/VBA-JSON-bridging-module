@@ -62,47 +62,60 @@ Sub Worker1_Scan_Direct_Vectors(ByVal json As String, ByRef nextRow As Long)
         End If
     End If
 End Sub
-
 Sub Worker2_Scan_Vectors_In_Vectors(ByVal json As String, ByRef nextRow As Long)
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
     Dim ws As Worksheet: Set ws = Sheets("Setup")
-    Dim matches As Object, parentMatches As Object, pMatch As Object
+    Dim matches As Object, parentMatches As Object, pxMatches As Object
+    Dim vivBlock As String, segmentText As String
+    Dim i As Long, j As Long, startPos As Long, endPos As Long
     
-    ' Pattern: Isolate the entire vectorsInVectors array [cite: 14, 18]
-    regEx.Pattern = """vectorsInVectors""\s*:\s*\[([\s\S]*?)\]\s*(?=\s*""\w+""\s*:|\s*\}\s*\})"
+    ' 1. Isolate the entire vectorsInVectors array
+    ' Anchor adapted to look for timeDependentVectors or the end of the object
+    regEx.Pattern = """vectorsInVectors""\s*:\s*\[([\s\S]*?)\]\s*,\s*""timeDependentVectors"""
     regEx.Global = False
     regEx.IgnoreCase = True
     
     Set matches = regEx.Execute(json)
     
     If matches.Count > 0 Then
-        Dim vivBlock As String: vivBlock = matches(0).subMatches(0)
+        vivBlock = matches(0).subMatches(0)
         
-        ' Secondary Regex: Find each Parent Group and its nested vectors array
+        ' 2. Identify all Group Header (Parent) Positions within the ViV block
         Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
-        regExParent.Pattern = "\{\s*""name""\s*:\s*""([^""]+)""[\s\S]*?""vectors""\s*:\s*\[([\s\S]*?)\]\s*\}"
+        ' Pattern for Group Names like policyInformation_1 UL2022
+        regExParent.Pattern = """name""\s*:\s*""([^""]+)""\s*,\s*""vectors""\s*:\s*\["
         regExParent.Global = True
-        
         Set parentMatches = regExParent.Execute(vivBlock)
         
-        For Each pMatch In parentMatches
-            Dim groupParentName As String: groupParentName = pMatch.subMatches(0) ' e.g., policyInformation_1 UL2022 [cite: 15]
-            Dim innerVectorText As String: innerVectorText = pMatch.subMatches(1)
+        ' 3. Slice the block into positional segments
+        For i = 0 To parentMatches.Count - 1
+            Dim groupName As String: groupName = parentMatches(i).subMatches(0)
             
-            ' Tertiary Regex: Extract individual child names
-            Dim regExChild As Object: Set regExChild = CreateObject("VBScript.RegExp")
-            regExChild.Pattern = """name""\s*:\s*""([^""]+)"""
-            regExChild.Global = True
+            ' Determine slice boundaries
+            startPos = parentMatches(i).FirstIndex
+            If i < parentMatches.Count - 1 Then
+                endPos = parentMatches(i + 1).FirstIndex
+            Else
+                endPos = Len(vivBlock)
+            End If
             
-            Dim childNames As Object: Set childNames = regExChild.Execute(innerVectorText)
-            Dim cMatch As Object
+            ' Extract segment and find variable names inside
+            segmentText = Mid(vivBlock, startPos + 1, endPos - startPos)
             
-            For Each cMatch In childNames
-                ws.Cells(nextRow, "R").Value = cMatch.subMatches(0)        ' PX output [cite: 15]
-                ws.Cells(nextRow, "S").Value = "vectorsInVectors"        ' output type
-                ws.Cells(nextRow, "T").Value = groupParentName           ' OutputParent [cite: 15]
-                nextRow = nextRow + 1
-            Next
+            Dim regExPX As Object: Set regExPX = CreateObject("VBScript.RegExp")
+            regExPX.Pattern = """name""\s*:\s*""([^""]+)"""
+            regExPX.Global = True
+            Set pxMatches = regExPX.Execute(segmentText)
+            
+            ' Populate Excel (skip index 0 - the parent name)
+            If pxMatches.Count > 1 Then
+                For j = 1 To pxMatches.Count - 1
+                    ws.Cells(nextRow, "R").Value = pxMatches(j).subMatches(0) ' PX output
+                    ws.Cells(nextRow, "S").Value = "vectorsInVectors"        ' output type
+                    ws.Cells(nextRow, "T").Value = groupName                 ' OutputParent
+                    nextRow = nextRow + 1
+                Next
+            End If
         Next
     End If
 End Sub
@@ -113,9 +126,9 @@ Sub Worker3_Scan_Time_Dependent_Vectors(ByVal json As String, ByRef nextRow As L
     Dim tdvBlock As String, segmentText As String
     Dim i As Long, j As Long, startPos As Long, endPos As Long
     
-    ' 1. Isolate the entire timeDependentVectors (TDV) array
-    ' Anchor strictly between the TDV key and the frequencyDependentVectors key
-    regEx.Pattern = """timeDependentVectors""\s*:\s*\[([\s\S]*?)\]\s*,\s*""frequencyDependentVectors"""
+    ' 1. Isolate the entire timeDependentVectors (TDV) block
+    ' Greedy capture ensures all data is included even if it's the last segment
+    regEx.Pattern = """timeDependentVectors""\s*:\s*\[([\s\S]+)\]"
     regEx.Global = False
     regEx.IgnoreCase = True
     
@@ -126,33 +139,32 @@ Sub Worker3_Scan_Time_Dependent_Vectors(ByVal json As String, ByRef nextRow As L
         
         ' 2. Identify all Group Header (Parent) Positions within the TDV block
         Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
-        ' Specifically targets group headers like "benefitIllustration"
         regExParent.Pattern = """name""\s*:\s*""([^""]+)""\s*,\s*""vectors""\s*:\s*\["
         regExParent.Global = True
         Set parentMatches = regExParent.Execute(tdvBlock)
         
-        ' 3. Slice the TDV block into segments and extract children
+        ' 3. Slice the block into positional segments to map Children to Parents
         For i = 0 To parentMatches.Count - 1
             Dim groupName As String: groupName = parentMatches(i).subMatches(0)
             
-            [cite_start] ' Determine the slice boundaries to prevent missing data like asset value [cite: 8, 12]
+            ' Determine slice boundaries (from current header to the start of the next header)
             startPos = parentMatches(i).FirstIndex
             If i < parentMatches.Count - 1 Then
                 endPos = parentMatches(i + 1).FirstIndex
             Else
+                ' Last segment (e.g., surrenderIllustration)
                 endPos = Len(tdvBlock)
             End If
             
-            ' Extract the segment containing all internal variables for this specific parent
+            ' Extract segment and find variable names (like asset value) inside
             segmentText = Mid(tdvBlock, startPos + 1, endPos - startPos)
             
-            ' Secondary extraction: Find all "name" elements within this slice
             Dim regExPX As Object: Set regExPX = CreateObject("VBScript.RegExp")
             regExPX.Pattern = """name""\s*:\s*""([^""]+)"""
             regExPX.Global = True
             Set pxMatches = regExPX.Execute(segmentText)
             
-            ' Populate Excel starting from index 1 (index 0 is the parent name itself)
+            ' Populate Excel starting from index 1 (skipping the parent name itself)
             If pxMatches.Count > 1 Then
                 For j = 1 To pxMatches.Count - 1
                     ws.Cells(nextRow, "R").Value = pxMatches(j).subMatches(0) ' PX output
