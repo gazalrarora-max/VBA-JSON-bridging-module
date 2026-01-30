@@ -1,1 +1,60 @@
+Sub SlicePXProject()
+    ' No References Required - Just Copy & Paste!
+    Dim fso As Object
+    Dim regEx As Object
+    Dim jsonFullText As String
+    Dim filePath As String
+    Dim anchors As Variant
+    Dim segmentNames As Variant
+    Dim pos(0 To 5) As Long
+    Dim i As Integer
+    Dim currentBlock As String
 
+    ' 1. Setup Objects
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set regEx = CreateObject("VBScript.RegExp")
+
+    ' 2. Path to your file (Update this path!)
+    filePath = "C:\Users\YourName\Documents\output4.json" 
+
+    ' 3. Read the entire file
+    If Not fso.FileExists(filePath) Then
+        MsgBox "File not found at: " & filePath
+        Exit Sub
+    End If
+    jsonFullText = fso.OpenTextFile(filePath, 1).ReadAll
+
+    ' 4. Define the boundaries (The anchors)
+    anchors = Array("""vectors"":", _
+                    """timeDependentVectors"":", _
+                    """frequencyDependentVectors"":", _
+                    """vectorsInVectors"":", _
+                    """timeDependentVectorInVectors"":", _
+                    "}]") ' End of the getOutput block
+    
+    segmentNames = Array("Vectors", "TDV", "FDV", "VIV", "TDVIV")
+
+    ' 5. Find the character position for each anchor
+    regEx.Global = False
+    For i = 0 To 5
+        regEx.Pattern = anchors(i)
+        If regEx.Test(jsonFullText) Then
+            pos(i) = regEx.Execute(jsonFullText)(0).FirstIndex + 1
+        End If
+    Next i
+
+    ' 6. Slice and Print to Immediate Window (Ctrl+G to see results)
+    Debug.Print "--- STARTING EXTRACTION ---"
+    For i = 0 To 4
+        If pos(i) > 0 And pos(i + 1) > 0 Then
+            ' This is the "Positional Slice" logic
+            currentBlock = Mid(jsonFullText, pos(i), pos(i + 1) - pos(i))
+            
+            Debug.Print "Captured Section: " & segmentNames(i)
+            Debug.Print "Content Snippet: " & Left(Replace(currentBlock, vbCrLf, ""), 100)
+            Debug.Print "--------------------------"
+        End If
+    Next i
+    
+    MsgBox "Slicing Complete! Check the Immediate Window (Ctrl+G) for results."
+End Sub
