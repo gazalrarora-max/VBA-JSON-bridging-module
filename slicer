@@ -3,7 +3,7 @@
 ' ==========================================================
 Sub Master_PX_Processor()
     Dim fso As Object, regEx As Object
-    Dim jsonFullText As String, filePath As String, currentBlock As String, missingSegments As String
+    Dim jsonFullText As String, filePath As String, currentBlock As String
     Dim anchors As Variant, segmentNames As Variant
     Dim pos(0 To 5) As Long
     Dim i As Integer, k As Integer, nextStop As Long
@@ -11,82 +11,50 @@ Sub Master_PX_Processor()
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set regEx = CreateObject("VBScript.RegExp")
 
-    ' Update this path to your desktop location 📍
     filePath = "C:\Users\gazal\OneDrive\Desktop\Office work\output4.json" 
 
     If Not fso.FileExists(filePath) Then
-        MsgBox "Error: File not found at " & filePath, vbCritical
+        MsgBox "Error: File not found!", vbCritical
         Exit Sub
     End If
     
     jsonFullText = fso.OpenTextFile(filePath, 1).ReadAll
-
-    ' Define the segments and the final closing anchor
-    anchors = Array("""vectors"":", _
-                    """timeDependentVectors"":", _
-                    """frequencyDependentVectors"":", _
-                    """vectorsInVectors"":", _
-                    """timeDependentVectorInVectors"":", _
-                    "}]") 
-    
+    anchors = Array("""vectors"":", """timeDependentVectors"":", """frequencyDependentVectors"":", """vectorsInVectors"":", """timeDependentVectorInVectors"":", "}]") 
     segmentNames = Array("Vectors", "TDV", "FDV", "VIV", "TDVIV")
 
     regEx.Global = False
-    missingSegments = ""
-    
-    ' 1. Map Character Positions
     For i = 0 To 5
         regEx.Pattern = anchors(i)
         If regEx.Test(jsonFullText) Then
             pos(i) = regEx.Execute(jsonFullText)(0).FirstIndex + 1
         Else
-            If i = 5 Then
-                pos(i) = Len(jsonFullText) + 1
-            Else
-                pos(i) = 0
-                missingSegments = missingSegments & " - " & segmentNames(i) & vbCrLf
-            End If
+            If i = 5 Then pos(i) = Len(jsonFullText) + 1 Else pos(i) = 0
         End If
     Next i
 
-    Debug.Print "=============================================="
-    Debug.Print "STARTING PX EXTRACTION: " & Now
-    Debug.Print "=============================================="
-    
-    ' 2. Slicing and Delegation Loop
+    Debug.Print "=== STARTING PX EXTRACTION ==="
     For i = 0 To 4
         If pos(i) > 0 Then
             nextStop = 0
             For k = i + 1 To 5
-                If pos(k) > 0 Then
-                    nextStop = pos(k)
-                    Exit For
-                End If
+                If pos(k) > 0 Then: nextStop = pos(k): Exit For
             Next k
             
             If nextStop > 0 Then
                 currentBlock = Mid(jsonFullText, pos(i), nextStop - pos(i))
-                
                 Select Case segmentNames(i)
-                    Case "Vectors"
-                        Call ProcessVectors(currentBlock)
-                    Case "VIV"
-                        Call ProcessVIV(currentBlock)
-                    Case "TDVIV"
-                        Call ProcessTDVIV(currentBlock)
-                    Case "TDV", "FDV"
-                        Debug.Print ">>> Section " & segmentNames(i) & " identified (Skipping: Not Setup)."
+                    Case "Vectors": Call ProcessVectors(currentBlock)
+                    Case "VIV": Call ProcessVIV(currentBlock)
+                    Case "TDVIV": Call ProcessTDVIV(currentBlock)
                 End Select
             End If
         End If
     Next i
-    
-    MsgBox "PX Processing Complete! Check Immediate Window (Ctrl+G).", vbInformation
-    Debug.Print "=============================================="
+    MsgBox "PX Processing Complete!", vbInformation
 End Sub
 
 ' ==========================================================
-' WORKER 1: Fixed Vectors
+' WORKERS (WITH SAFE SLICING)
 ' ==========================================================
 Sub ProcessVectors(ByVal segmentText As String)
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
@@ -95,79 +63,58 @@ Sub ProcessVectors(ByVal segmentText As String)
     regEx.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
     regEx.Global = True
     Set matches = regEx.Execute(segmentText)
-    If matches.Count > 0 Then
-        For Each m In matches
-            Debug.Print "   Output: " & m.SubMatches(0) & " | Value: " & m.SubMatches(1) & " | Parent: None"
-        Next m
-    End If
+    For Each m In matches: Debug.Print "   Output: " & m.SubMatches(0) & " | Value: " & m.SubMatches(1): Next m
 End Sub
 
-' ==========================================================
-' WORKER 2: VectorsInVectors (VIV)
-' ==========================================================
 Sub ProcessVIV(ByVal segmentText As String)
     Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
     Dim regExChild As Object: Set regExChild = CreateObject("VBScript.RegExp")
-    Dim parentMatches As Object, childMatches As Object
-    Dim i As Integer, j As Integer, nextParentPos As Long
-    Dim parentName As String, groupBlock As String
+    Dim pMatches As Object, cMatches As Object, i As Integer, j As Integer
+    Dim pName As String, gBlock As String, nPos As Long
 
     Debug.Print "--- BLOCK: VIV ---"
-    regExParent.Pattern = """name"":\s*""([^""]+)"",\s*""vectors"":\s*\["
-    regExParent.Global = True
-    regExChild.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
-    regExChild.Global = True
+    regExParent.Pattern = """name"":\s*""([^""]+)"",\s*""vectors"":\s*\[": regExParent.Global = True
+    regExChild.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)""": regExChild.Global = True
 
-    Set parentMatches = regExParent.Execute(segmentText)
-    For i = 0 To parentMatches.Count - 1
-        parentName = parentMatches(i).SubMatches(0)
-        nextParentPos = IIf(i < parentMatches.Count - 1, parentMatches(i + 1).FirstIndex, Len(segmentText))
-        groupBlock = Mid(segmentText, parentMatches(i).FirstIndex + 1, nextParentPos - parentMatches(i).FirstIndex)
-        Debug.Print "   Parent: " & parentName
-        Set childMatches = regExChild.Execute(groupBlock)
-        For j = 0 To childMatches.Count - 1
-            Debug.Print "      -> Output: " & childMatches(j).SubMatches(0) & " | Value: " & childMatches(j).SubMatches(1)
-        Next j
+    Set pMatches = regExParent.Execute(segmentText)
+    For i = 0 To pMatches.Count - 1
+        pName = pMatches(i).SubMatches(0)
+        ' SAFE SLICING LOGIC
+        If i < pMatches.Count - 1 Then: nPos = pMatches(i + 1).FirstIndex: Else: nPos = Len(segmentText): End If
+        gBlock = Mid(segmentText, pMatches(i).FirstIndex + 1, nPos - pMatches(i).FirstIndex)
+        Debug.Print "   Parent: " & pName
+        Set cMatches = regExChild.Execute(gBlock)
+        For j = 0 To cMatches.Count - 1: Debug.Print "      -> Output: " & cMatches(j).SubMatches(0) & " | Value: " & cMatches(j).SubMatches(1): Next j
     Next i
 End Sub
 
-' ==========================================================
-' WORKER 3: Time Dependent Vector In Vectors (TDVIV)
-' ==========================================================
 Sub ProcessTDVIV(ByVal segmentText As String)
-    Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
-    Dim regExVar As Object: Set regExVar = CreateObject("VBScript.RegExp")
-    Dim regExTime As Object: Set regExTime = CreateObject("VBScript.RegExp")
-    Dim parentMatches As Object, varMatches As Object, timeMatches As Object
-    Dim i As Integer, j As Integer, k As Integer, nextParentPos As Long, nextVarPos As Long
-    Dim parentName As String, varName As String, parentBlock As String, varBlock As String
+    Dim regExP As Object: Set regExP = CreateObject("VBScript.RegExp")
+    Dim regExV As Object: Set regExV = CreateObject("VBScript.RegExp")
+    Dim regExT As Object: Set regExT = CreateObject("VBScript.RegExp")
+    Dim pM As Object, vM As Object, tM As Object, i As Integer, j As Integer, k As Integer
+    Dim pName As String, vName As String, pBlock As String, vBlock As String, nP As Long, nV As Long
 
     Debug.Print "--- BLOCK: TDVIV ---"
-    ' Use the specific pattern for TDVIV parents
-    regExParent.Pattern = """name"":\s*""([^""]+)"",\s*""timeDependentVectors"":\s*\["
-    regExParent.Global = True
-    regExVar.Pattern = """name"":\s*""([^""]+)"",\s*""unitOfTime"""
-    regExVar.Global = True
-    regExTime.Pattern = """t"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
-    regExTime.Global = True
+    regExP.Pattern = """name"":\s*""([^""]+)"",\s*""timeDependentVectors"":\s*\[": regExP.Global = True
+    regExV.Pattern = """name"":\s*""([^""]+)"",\s*""unitOfTime""": regExV.Global = True
+    regExT.Pattern = """t"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)""": regExT.Global = True
 
-    Set parentMatches = regExParent.Execute(segmentText)
-    For i = 0 To parentMatches.Count - 1
-        parentName = parentMatches(i).SubMatches(0)
-        nextParentPos = IIf(i < parentMatches.Count - 1, parentMatches(i + 1).FirstIndex, Len(segmentText))
-        parentBlock = Mid(segmentText, parentMatches(i).FirstIndex + 1, nextParentPos - parentMatches(i).FirstIndex)
-        Debug.Print "   Parent: " & parentName
-        
-        Set varMatches = regExVar.Execute(parentBlock)
-        For j = 0 To varMatches.Count - 1
-            varName = varMatches(j).SubMatches(0)
-            nextVarPos = IIf(j < varMatches.Count - 1, varMatches(j + 1).FirstIndex, Len(parentBlock))
-            varBlock = Mid(parentBlock, varMatches(j).FirstIndex + 1, nextVarPos - varMatches(j).FirstIndex)
-            
-            Set timeMatches = regExTime.Execute(varBlock)
-            For k = 0 To timeMatches.Count - 1
-                Debug.Print "      -> Output: " & varName & " | t: " & timeMatches(k).SubMatches(0) & " | Value: " & timeMatches(k).SubMatches(1)
-            Next k
+    Set pM = regExP.Execute(segmentText)
+    For i = 0 To pM.Count - 1
+        pName = pM(i).SubMatches(0)
+        ' SAFE SLICING LOGIC
+        If i < pM.Count - 1 Then: nP = pM(i + 1).FirstIndex: Else: nP = Len(segmentText): End If
+        pBlock = Mid(segmentText, pM(i).FirstIndex + 1, nP - pM(i).FirstIndex)
+        Debug.Print "   Parent: " & pName
+        Set vM = regExV.Execute(pBlock)
+        For j = 0 To vM.Count - 1
+            vName = vM(j).SubMatches(0)
+            ' SAFE SLICING LOGIC
+            If j < vM.Count - 1 Then: nV = vM(j + 1).FirstIndex: Else: nV = Len(pBlock): End If
+            vBlock = Mid(pBlock, vM(j).FirstIndex + 1, nV - vM(j).FirstIndex)
+            Set tM = regExT.Execute(vBlock)
+            For k = 0 To tM.Count - 1: Debug.Print "      -> Output: " & vName & " | t: " & tM(k).SubMatches(0) & " | Value: " & tM(k).SubMatches(1): Next k
         Next j
     Next i
 End Sub
