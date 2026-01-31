@@ -1,5 +1,5 @@
 ' ==========================================================
-' MAIN CONTROLLER: The Brain of the Operation
+' MAIN CONTROLLER
 ' ==========================================================
 Sub Master_PX_Processor()
     Dim fso As Object, regEx As Object
@@ -21,7 +21,7 @@ Sub Master_PX_Processor()
     
     jsonFullText = fso.OpenTextFile(filePath, 1).ReadAll
 
-    ' Define the 5 segments and the final closing anchor
+    ' Define the segments and the final closing anchor
     anchors = Array("""vectors"":", _
                     """timeDependentVectors"":", _
                     """frequencyDependentVectors"":", _
@@ -81,18 +81,17 @@ Sub Master_PX_Processor()
         End If
     Next i
     
-    MsgBox "PX Processing Complete!" & vbCrLf & "Check the Immediate Window (Ctrl+G) for results.", vbInformation
+    MsgBox "PX Processing Complete! Check Immediate Window (Ctrl+G).", vbInformation
     Debug.Print "=============================================="
 End Sub
 
 ' ==========================================================
-' WORKER 1: Extracting Fixed Vectors
+' WORKER 1: Fixed Vectors
 ' ==========================================================
 Sub ProcessVectors(ByVal segmentText As String)
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
     Dim matches As Object, m As Object
     Debug.Print "--- BLOCK: VECTORS ---"
-    regEx.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+) miniatures"""
     regEx.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
     regEx.Global = True
     Set matches = regEx.Execute(segmentText)
@@ -104,7 +103,7 @@ Sub ProcessVectors(ByVal segmentText As String)
 End Sub
 
 ' ==========================================================
-' WORKER 2: Extracting VectorsInVectors (VIV)
+' WORKER 2: VectorsInVectors (VIV)
 ' ==========================================================
 Sub ProcessVIV(ByVal segmentText As String)
     Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
@@ -133,7 +132,7 @@ Sub ProcessVIV(ByVal segmentText As String)
 End Sub
 
 ' ==========================================================
-' WORKER 3: Extracting TimeDependentVectorInVectors (TDVIV)
+' WORKER 3: Time Dependent Vector In Vectors (TDVIV)
 ' ==========================================================
 Sub ProcessTDVIV(ByVal segmentText As String)
     Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
@@ -144,7 +143,8 @@ Sub ProcessTDVIV(ByVal segmentText As String)
     Dim parentName As String, varName As String, parentBlock As String, varBlock As String
 
     Debug.Print "--- BLOCK: TDVIV ---"
-    regExParent.Pattern = """name"":\s*""([^""]+)"",\s*""vectors"":\s*\["
+    ' Use the specific pattern for TDVIV parents
+    regExParent.Pattern = """name"":\s*""([^""]+)"",\s*""timeDependentVectors"":\s*\["
     regExParent.Global = True
     regExVar.Pattern = """name"":\s*""([^""]+)"",\s*""unitOfTime"""
     regExVar.Global = True
@@ -157,11 +157,13 @@ Sub ProcessTDVIV(ByVal segmentText As String)
         nextParentPos = IIf(i < parentMatches.Count - 1, parentMatches(i + 1).FirstIndex, Len(segmentText))
         parentBlock = Mid(segmentText, parentMatches(i).FirstIndex + 1, nextParentPos - parentMatches(i).FirstIndex)
         Debug.Print "   Parent: " & parentName
+        
         Set varMatches = regExVar.Execute(parentBlock)
         For j = 0 To varMatches.Count - 1
             varName = varMatches(j).SubMatches(0)
             nextVarPos = IIf(j < varMatches.Count - 1, varMatches(j + 1).FirstIndex, Len(parentBlock))
             varBlock = Mid(parentBlock, varMatches(j).FirstIndex + 1, nextVarPos - varMatches(j).FirstIndex)
+            
             Set timeMatches = regExTime.Execute(varBlock)
             For k = 0 To timeMatches.Count - 1
                 Debug.Print "      -> Output: " & varName & " | t: " & timeMatches(k).SubMatches(0) & " | Value: " & timeMatches(k).SubMatches(1)
