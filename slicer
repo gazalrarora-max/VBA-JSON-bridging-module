@@ -16,15 +16,17 @@ Sub Master_PX_Processor()
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set regEx = CreateObject("VBScript.RegExp")
 
-    ' UPDATED PATH 📍
+    ' Your specific path 📍
     filePath = "C:\Users\gazal\OneDrive\Desktop\Office work\output4.json" 
 
     If Not fso.FileExists(filePath) Then
         MsgBox "Error: File not found at " & filePath, vbCritical
         Exit Sub
     End If
+    
     jsonFullText = fso.OpenTextFile(filePath, 1).ReadAll
 
+    ' Define the 5 segments and the final closing anchor
     anchors = Array("""vectors"":", _
                     """timeDependentVectors"":", _
                     """frequencyDependentVectors"":", _
@@ -37,6 +39,7 @@ Sub Master_PX_Processor()
     regEx.Global = False
     missingSegments = ""
     
+    ' 1. Map Character Positions
     For i = 0 To 5
         regEx.Pattern = anchors(i)
         If regEx.Test(jsonFullText) Then
@@ -51,16 +54,16 @@ Sub Master_PX_Processor()
         End If
     Next i
 
-    If missingSegments <> "" Then
-        MsgBox "Sanity Check: The following blocks were not found:" & vbCrLf & missingSegments, vbInformation
-    End If
-
-    Debug.Print "=== STARTING PX EXTRACTION ==="
+    Debug.Print "=============================================="
+    Debug.Print "STARTING PX EXTRACTION: " & filePath
+    Debug.Print "=============================================="
     
+    ' 2. Slicing and Delegation Loop
     For i = 0 To 4
         If pos(i) > 0 Then
             Dim nextStop As Long: nextStop = 0
             Dim k As Integer
+            ' Find the next available anchor to determine where to stop slicing
             For k = i + 1 To 5
                 If pos(k) > 0 Then
                     nextStop = pos(k)
@@ -70,29 +73,41 @@ Sub Master_PX_Processor()
             
             If nextStop > 0 Then
                 currentBlock = Mid(jsonFullText, pos(i), nextStop - pos(i))
-                Debug.Print ">>> Section: " & segmentNames(i)
                 
-                If segmentNames(i) = "Vectors" Then
-                    Call ProcessVectors(currentBlock)
-                End If
-                
-                ' TDVIV is now safely captured here even if it's the last block!
+                Select Case segmentNames(i)
+                    Case "Vectors"
+                        Call ProcessVectors(currentBlock)
+                    
+                    Case "VIV"
+                        Call ProcessVIV(currentBlock)
+                        
+                    Case "TDV", "FDV"
+                        Debug.Print ">>> Section " & segmentNames(i) & " identified (Skipping: Not Setup)."
+                        
+                    Case "TDVIV"
+                        Debug.Print ">>> Section TDVIV identified (Ready for Worker 3)."
+                End Select
             End If
         End If
     Next i
     
-    Debug.Print "=== PROCESSING COMPLETE ==="
+    MsgBox "PX Processing Complete!" & vbCrLf & vbCrLf & _
+           "Note: TDV and FDV segments were ignored as requested.", vbInformation, "Status Update"
+    
+    Debug.Print "=============================================="
+    Debug.Print "PROCESSING COMPLETE"
+    Debug.Print "=============================================="
 End Sub
 
 ' ==========================================================
 ' WORKER 1: Extracting Fixed Vectors
 ' ==========================================================
 Sub ProcessVectors(ByVal segmentText As String)
-    Dim regEx As Object
-    Dim matches As Object
-    Dim m As Object
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    Dim matches As Object, m As Object
     
-    Set regEx = CreateObject("VBScript.RegExp")
+    Debug.Print "--- BLOCK: VECTORS (Type: Vector) ---"
+    
     regEx.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
     regEx.Global = True
     
@@ -100,7 +115,56 @@ Sub ProcessVectors(ByVal segmentText As String)
     
     If matches.Count > 0 Then
         For Each m In matches
-            Debug.Print "   Vector Found -> Name: " & m.SubMatches(0) & " | Value: " & m.SubMatches(1)
+            Debug.Print "   PX Output: " & m.SubMatches(0) & " | Value: " & m.SubMatches(1) & " | Parent: None"
         Next m
+    Else
+        Debug.Print "   (No Vectors found)"
+    End If
+End Sub
+
+' ==========================================================
+' WORKER 2: Extracting VectorsInVectors (VIV)
+' ==========================================================
+Sub ProcessVIV(ByVal segmentText As String)
+    Dim regExParent As Object: Set regExParent = CreateObject("VBScript.RegExp")
+    Dim regExChild As Object: Set regExChild = CreateObject("VBScript.RegExp")
+    Dim parentMatches As Object, childMatches As Object
+    Dim i As Integer, j As Integer
+    Dim parentName As String, groupBlock As String, nextParentPos As Long
+
+    Debug.Print "--- BLOCK: VIV (Type: vectorsInVectors) ---"
+
+    ' Find Parent Group Names
+    regExParent.Pattern = """name"":\s*""([^""]+)"",\s*""vectors"":\s*\["
+    regExParent.Global = True
+    
+    ' Find Child Name/Value pairs
+    regExChild.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
+    regExChild.Global = True
+
+    Set parentMatches = regExParent.Execute(segmentText)
+
+    If parentMatches.Count > 0 Then
+        For i = 0 To parentMatches.Count - 1
+            parentName = parentMatches(i).SubMatches(0)
+            
+            ' Slice the text to only look at THIS parent's children
+            If i < parentMatches.Count - 1 Then
+                nextParentPos = parentMatches(i + 1).FirstIndex
+            Else
+                nextParentPos = Len(segmentText)
+            End If
+            
+            groupBlock = Mid(segmentText, parentMatches(i).FirstIndex + 1, nextParentPos - parentMatches(i).FirstIndex)
+            
+            Debug.Print "   OutputParent: " & parentName
+            
+            Set childMatches = regExChild.Execute(groupBlock)
+            For j = 0 To childMatches.Count - 1
+                Debug.Print "      -> PX Output: " & childMatches(j).SubMatches(0) & " | Value: " & childMatches(j).SubMatches(1)
+            Next j
+        Next i
+    Else
+        Debug.Print "   (No VIV Groups found)"
     End If
 End Sub
