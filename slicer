@@ -1,5 +1,7 @@
-Sub SlicePXProject()
-    ' No References Required - Just Copy & Paste!
+' ==========================================================
+' MAIN CONTROLLER
+' ==========================================================
+Sub Master_PX_Processor()
     Dim fso As Object
     Dim regEx As Object
     Dim jsonFullText As String
@@ -9,52 +11,96 @@ Sub SlicePXProject()
     Dim pos(0 To 5) As Long
     Dim i As Integer
     Dim currentBlock As String
+    Dim missingSegments As String
 
-    ' 1. Setup Objects
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set regEx = CreateObject("VBScript.RegExp")
 
-    ' 2. Path to your file (Update this path!)
-    filePath = "C:\Users\YourName\Documents\output4.json" 
+    ' UPDATED PATH 📍
+    filePath = "C:\Users\gazal\OneDrive\Desktop\Office work\output4.json" 
 
-    ' 3. Read the entire file
     If Not fso.FileExists(filePath) Then
-        MsgBox "File not found at: " & filePath
+        MsgBox "Error: File not found at " & filePath, vbCritical
         Exit Sub
     End If
     jsonFullText = fso.OpenTextFile(filePath, 1).ReadAll
 
-    ' 4. Define the boundaries (The anchors)
     anchors = Array("""vectors"":", _
                     """timeDependentVectors"":", _
                     """frequencyDependentVectors"":", _
                     """vectorsInVectors"":", _
                     """timeDependentVectorInVectors"":", _
-                    "}]") ' End of the getOutput block
+                    "}]") 
     
     segmentNames = Array("Vectors", "TDV", "FDV", "VIV", "TDVIV")
 
-    ' 5. Find the character position for each anchor
     regEx.Global = False
+    missingSegments = ""
+    
     For i = 0 To 5
         regEx.Pattern = anchors(i)
         If regEx.Test(jsonFullText) Then
             pos(i) = regEx.Execute(jsonFullText)(0).FirstIndex + 1
+        Else
+            If i = 5 Then
+                pos(i) = Len(jsonFullText) + 1
+            Else
+                pos(i) = 0
+                missingSegments = missingSegments & " - " & segmentNames(i) & vbCrLf
+            End If
         End If
     Next i
 
-    ' 6. Slice and Print to Immediate Window (Ctrl+G to see results)
-    Debug.Print "--- STARTING EXTRACTION ---"
+    If missingSegments <> "" Then
+        MsgBox "Sanity Check: The following blocks were not found:" & vbCrLf & missingSegments, vbInformation
+    End If
+
+    Debug.Print "=== STARTING PX EXTRACTION ==="
+    
     For i = 0 To 4
-        If pos(i) > 0 And pos(i + 1) > 0 Then
-            ' This is the "Positional Slice" logic
-            currentBlock = Mid(jsonFullText, pos(i), pos(i + 1) - pos(i))
+        If pos(i) > 0 Then
+            Dim nextStop As Long: nextStop = 0
+            Dim k As Integer
+            For k = i + 1 To 5
+                If pos(k) > 0 Then
+                    nextStop = pos(k)
+                    Exit For
+                End If
+            Next k
             
-            Debug.Print "Captured Section: " & segmentNames(i)
-            Debug.Print "Content Snippet: " & Left(Replace(currentBlock, vbCrLf, ""), 100)
-            Debug.Print "--------------------------"
+            If nextStop > 0 Then
+                currentBlock = Mid(jsonFullText, pos(i), nextStop - pos(i))
+                Debug.Print ">>> Section: " & segmentNames(i)
+                
+                If segmentNames(i) = "Vectors" Then
+                    Call ProcessVectors(currentBlock)
+                End If
+                
+                ' TDVIV is now safely captured here even if it's the last block!
+            End If
         End If
     Next i
     
-    MsgBox "Slicing Complete! Check the Immediate Window (Ctrl+G) for results."
+    Debug.Print "=== PROCESSING COMPLETE ==="
+End Sub
+
+' ==========================================================
+' WORKER 1: Extracting Fixed Vectors
+' ==========================================================
+Sub ProcessVectors(ByVal segmentText As String)
+    Dim regEx As Object
+    Dim matches As Object
+    Dim m As Object
+    
+    Set regEx = CreateObject("VBScript.RegExp")
+    regEx.Pattern = """name"":\s*""([^""]+)"",\s*""value"":\s*""([^""]+)"""
+    regEx.Global = True
+    
+    Set matches = regEx.Execute(segmentText)
+    
+    If matches.Count > 0 Then
+        For Each m In matches
+            Debug.Print "   Vector Found -> Name: " & m.SubMatches(0) & " | Value: " & m.SubMatches(1)
+        Next m
+    End If
 End Sub
