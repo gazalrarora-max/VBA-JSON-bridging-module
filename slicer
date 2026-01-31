@@ -1,31 +1,42 @@
 ' ==========================================================
-' MAIN CONTROLLER: Exports to Columns R, S, T
+' MAIN CONTROLLER: Includes File Picker and Setup Tab Export
 ' ==========================================================
 Sub Master_PX_Processor()
     Dim fso As Object, regEx As Object
-    Dim jsonFullText As String, filePath As String, currentBlock As String
+    Dim jsonFullText As String, filePath As Variant, currentBlock As String
     Dim anchors As Variant, segmentNames As Variant
     Dim pos(0 To 5) As Long
     Dim i As Integer, k As Integer, nextStop As Long
-    Dim targetSheet As Worksheet: Set targetSheet = ThisWorkbook.Sheets("Setup")
+    Dim targetSheet As Worksheet
     Dim nextRow As Long
 
-    ' 1. Clear Existing Data starting from Row 10
+    ' 1. Set the Target Sheet
+    On Error Resume Next
+    Set targetSheet = ThisWorkbook.Sheets("Setup")
+    On Error GoTo 0
+    
+    If targetSheet Is Nothing Then
+        MsgBox "Error: 'Setup' tab not found in this workbook!", vbCritical
+        Exit Sub
+    End If
+
+    ' 2. File Picker for JSON
+    filePath = Application.GetOpenFilename("JSON Files (*.json), *.json", , "Select your Output JSON File")
+    
+    If filePath = False Then
+        Exit Sub ' User cancelled
+    End If
+
+    ' 3. Clear Existing Data starting from Row 10 (Columns R, S, T)
     nextRow = 10
-    targetSheet.Range("R" & nextRow & ":U1000").ClearContents
+    targetSheet.Range("R" & nextRow & ":T1000").ClearContents
 
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set regEx = CreateObject("VBScript.RegExp")
 
-    ' Update Path to your file 📍
-    filePath = "C:\Users\gazal\OneDrive\Desktop\Office work\output4.json" 
-
-    If Not fso.FileExists(filePath) Then
-        MsgBox "Error: File not found!", vbCritical
-        Exit Sub
-    End If
-    
+    ' 4. Read File Content
     jsonFullText = fso.OpenTextFile(filePath, 1).ReadAll
+
     anchors = Array("""vectors"":", """timeDependentVectors"":", """frequencyDependentVectors"":", """vectorsInVectors"":", """timeDependentVectorInVectors"":", "}]") 
     segmentNames = Array("vectors", "TDV", "FDV", "vectorsInVectors", "timeDependentVectorInVectors")
 
@@ -43,7 +54,7 @@ Sub Master_PX_Processor()
         End If
     Next i
 
-    ' 2. Slicing and Exporting to Columns R, S, T
+    ' 5. Process Segments and Export
     For i = 0 To 4
         If pos(i) > 0 Then
             nextStop = 0
@@ -68,7 +79,7 @@ Sub Master_PX_Processor()
         End If
     Next i
     
-    MsgBox "Import Successful into Setup Sheet!", vbInformation
+    MsgBox "Data successfully exported to the Setup tab!", vbInformation
 End Sub
 
 ' ==========================================================
