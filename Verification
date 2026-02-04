@@ -40,4 +40,37 @@ Sub PX_Header_Controller()
         
         ' Populate Tracking
         wsReport.Cells(5 + i, 2).Value = currentPXKey
-        wsReport.Cells(5 + i, 3).Value
+        wsReport.Cells(5 + i, 3).Value = currentERKey
+        
+        ' 5. Availability Check (Step 11)
+        Dim pxExists As Boolean, erExists As Boolean
+        On Error Resume Next
+        pxExists = (pxFiles(currentPXKey) <> "")
+        erExists = (erFiles(currentERKey) <> "")
+        On Error GoTo 0
+        
+        If pxExists And erExists Then
+            ' 6. Section Boundary Detection (Step 14)
+            ' Using Get Output order: Vectors, TDV, FDV, VIV, TDVIV
+            Dim jsonText As String: jsonText = fso.OpenTextFile(pxFiles(currentPXKey)).ReadAll
+            Dim posVec As Long, posTDV As Long, posFDV As Long, posVIV As Long, posTDVIV As Long
+            
+            posVec = InStr(jsonText, """vectors"":")
+            posTDV = InStr(jsonText, """timeDependentVectors"":")
+            posFDV = InStr(jsonText, """frequencyDependentVectors"":")
+            posVIV = InStr(jsonText, """vectorsInVectors"":")
+            posTDVIV = InStr(jsonText, """timeDependentVectorInVectors"":")
+            
+            ' 7. Workbook Creation & File Opening (Step 12, 13, 15)
+            Dim resultsWB As Workbook: Set resultsWB = Workbooks.Add
+            Dim erWB As Workbook: Set erWB = Workbooks.Open(erFiles(currentERKey))
+            
+            ' Logic for Step 15/16 (Individual Vectors) would be called here
+            ' Process_Vectors wsSetup, resultsWB, erWB, jsonText, posVec, posTDV
+            
+            ' erWB.Close SaveChanges:=False
+        End If
+    Next i
+    
+    MsgBox "Header Macro Complete: Lists generated and JSON sections positioned."
+End Sub
