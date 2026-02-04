@@ -1,1 +1,78 @@
-
+Sub PX_Header_Controller()
+    Dim wsSetup As Worksheet, wsReport As Worksheet
+    Dim pxPath As String, erPath As String, tcPrefix As String
+    Dim tolerance As Double, lastRow As Long
+    Dim pxFiles As Object, erFiles As Object
+    Dim i As Long, maxTC As Long
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' 1. Data Collection & Setup
+    Set wsSetup = ThisWorkbook.Sheets("Setup")
+    Set wsReport = ThisWorkbook.Sheets("Verification Report")
+    pxPath = Range("PXOut_Path").Value
+    erPath = Range("ER_Fol").Value
+    tcPrefix = Range("PX_Header").Value
+    tolerance = Range("Tolerance_Comp").Value
+    lastRow = wsSetup.Cells(wsSetup.Rows.Count, "R").End(xlUp).Row
+    
+    ' 2. Verification Report Setup (Steps 3 & 10)
+    ' Populates Headers from Column S (Type) and R (Name)
+    For i = 10 To lastRow
+        wsReport.Cells(4, i - 5).Value = wsSetup.Cells(i, "S").Value 
+        wsReport.Cells(5, i - 5).Value = wsSetup.Cells(i, "R").Value 
+    Next i
+    
+    ' 3. List Available Files (Steps 4, 5, 8)
+    Set pxFiles = CreateObject("Scripting.Dictionary")
+    Set erFiles = CreateObject("Scripting.Dictionary")
+    
+    Dim folderFile As Object
+    ' Mapping PX Files
+    For Each folderFile In fso.GetFolder(pxPath).Files
+        If InStr(folderFile.Name, tcPrefix) > 0 Then pxFiles.Add folderFile.Name, folderFile.Path
+    Next folderFile
+    
+    ' Mapping Expected Result Files
+    For Each folderFile In fso.GetFolder(erPath).Files
+        If InStr(folderFile.Name, tcPrefix) > 0 Then erFiles.Add folderFile.Name, folderFile.Path
+    Next folderFile
+    
+    ' 4. Loop through Test Cases (Step 9)
+    maxTC = IIf(pxFiles.Count > erFiles.Count, pxFiles.Count, erFiles.Count)
+    
+    For i = 1 To maxTC
+        Dim currentPXName As String: currentPXName = tcPrefix & i & "_Output.json" ' Adjust naming convention as needed
+        Dim currentERName As String: currentERName = tcPrefix & i & "_Calc.xlsx"
+        
+        ' Populate Tracking Columns B & C
+        wsReport.Cells(5 + i, 2).Value = currentPXName
+        wsReport.Cells(5 + i, 3).Value = currentERName
+        
+        ' 5. Availability Check & File Opening (Step 11 & 12)
+        If pxFiles.Exists(currentPXName) And erFiles.Exists(currentERName) Then
+            
+            ' 6. Section Boundary Detection (Step 14)
+            ' Reads the JSON to find the starting line for each block
+            Dim jsonText As String: jsonText = fso.OpenTextFile(pxFiles(currentPXName)).ReadAll
+            Dim posVec As Long, posTDV As Long, posFDV As Long, posVIV As Long, posTDVIV As Long
+            
+            posVec = InStr(jsonText, """vectors"":")
+            posTDV = InStr(jsonText, """timeDependentVectors"":")
+            posFDV = InStr(jsonText, """frequencyDependentVectors"":")
+            posVIV = InStr(jsonText, """vectorsInVectors"":")
+            posTDVIV = InStr(jsonText, """timeDependentVectorInVectors"":")
+            
+            ' 7. Workbook Creation & Sheet Loop (Step 13 & 15)
+            Dim resultsWB As Workbook: Set resultsWB = Workbooks.Add
+            Dim erWB As Workbook: Set erWB = Workbooks.Open(erFiles(currentERName))
+            
+            ' Identify unique output types from Column S to create sheets
+            ' (Calls specific sub-macros here like Process_Vectors)
+            
+            ' Pause for Next Target: Time Dependent Vectors
+            erWB.Close SaveChanges:=False
+        End If
+    Next i
+    
+    MsgBox "Header Macro Complete: Files indexed and section boundaries identified."
+End Sub
