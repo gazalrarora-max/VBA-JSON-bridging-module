@@ -1,4 +1,4 @@
-Sub PX_Header_Controller()
+Sub Generate_Report()
     Dim wsSetup As Worksheet, wsReport As Worksheet
     Dim pxPath As String, erPath As String, tcPrefix As String
     Dim tolerance As Double, lastRow As Long
@@ -15,13 +15,25 @@ Sub PX_Header_Controller()
     tolerance = Range("Tolerance_Comp").Value
     lastRow = wsSetup.Cells(wsSetup.Rows.Count, "R").End(xlUp).Row
     
-    ' 2. Verification Report Setup (Steps 3 & 10)
+    ' --- NEW SEGMENT: Import Data R to U for Further Use ---
+    ' This stores the mapping context (PX Output, Type, Parent, Calc Name) in memory
+    Dim mappingData As Variant
+    mappingData = wsSetup.Range("R10:U" & lastRow).Value
+    ' ------------------------------------------------------
+
+    ' --- NEW SEGMENT: Extract Columns E to H for ER Mapping ---
+    ' Index 1: Test Case Header, 2: Sheet Name (Inputs), 3: Sheet Name (Outputs), 4: Range/Cell
+    Dim erMapping As Variant
+    erMapping = wsSetup.Range("E10:H" & lastRow).Value
+    ' ----------------------------------------------------------
+    
+    ' 2. Verification Report Setup
     For i = 10 To lastRow
-        wsReport.Cells(4, i - 5).Value = wsSetup.Cells(i, "S").Value ' Output Type (X/S)
-        wsReport.Cells(5, i - 5).Value = wsSetup.Cells(i, "R").Value ' PX Output Name
+        wsReport.Cells(4, i - 5).Value = wsSetup.Cells(i, "S").Value 
+        wsReport.Cells(5, i - 5).Value = wsSetup.Cells(i, "R").Value 
     Next i
     
-    ' 3. List Available Files (Lists/Collections for easier checking)
+    ' 3. List Available Files
     Dim folderFile As Object
     For Each folderFile In fso.GetFolder(pxPath).Files
         If InStr(folderFile.Name, tcPrefix) > 0 Then pxFiles.Add folderFile.Path, folderFile.Name
@@ -31,18 +43,18 @@ Sub PX_Header_Controller()
         If InStr(folderFile.Name, "TC_") > 0 Then erFiles.Add folderFile.Path, folderFile.Name
     Next folderFile
     
-    ' 4. Loop through Test Cases (Step 9)
+    ' 4. Loop through Test Cases
     maxTC = IIf(pxFiles.Count > erFiles.Count, pxFiles.Count, erFiles.Count)
     
     For i = 1 To maxTC
-        Dim currentPXKey As String: currentPXKey = tcPrefix & i & ".json" ' Cleaned naming
-        Dim currentERKey As String: currentERKey = "TC_" & i & ".xlsx"    ' Fixed naming
+        Dim currentPXKey As String: currentPXKey = tcPrefix & i & ".json" 
+        Dim currentERKey As String: currentERKey = "TC_" & i & ".xlsx"    
         
         ' Populate Tracking
         wsReport.Cells(5 + i, 2).Value = currentPXKey
         wsReport.Cells(5 + i, 3).Value = currentERKey
         
-        ' 5. Availability Check (Step 11)
+        ' 5. Availability Check
         Dim pxExists As Boolean, erExists As Boolean
         On Error Resume Next
         pxExists = (pxFiles(currentPXKey) <> "")
@@ -50,8 +62,7 @@ Sub PX_Header_Controller()
         On Error GoTo 0
         
         If pxExists And erExists Then
-            ' 6. Section Boundary Detection (Step 14)
-            ' Using Get Output order: Vectors, TDV, FDV, VIV, TDVIV
+            ' 6. Section Boundary Detection
             Dim jsonText As String: jsonText = fso.OpenTextFile(pxFiles(currentPXKey)).ReadAll
             Dim posVec As Long, posTDV As Long, posFDV As Long, posVIV As Long, posTDVIV As Long
             
@@ -61,16 +72,15 @@ Sub PX_Header_Controller()
             posVIV = InStr(jsonText, """vectorsInVectors"":")
             posTDVIV = InStr(jsonText, """timeDependentVectorInVectors"":")
             
-            ' 7. Workbook Creation & File Opening (Step 12, 13, 15)
+            ' 7. Workbook Creation & File Opening
             Dim resultsWB As Workbook: Set resultsWB = Workbooks.Add
             Dim erWB As Workbook: Set erWB = Workbooks.Open(erFiles(currentERKey))
             
-            ' Logic for Step 15/16 (Individual Vectors) would be called here
-            ' Process_Vectors wsSetup, resultsWB, erWB, jsonText, posVec, posTDV
+            ' Next steps will pass mappingData and erMapping to sub-macros
             
             ' erWB.Close SaveChanges:=False
         End If
     Next i
     
-    MsgBox "Header Macro Complete: Lists generated and JSON sections positioned."
+    MsgBox "Report Generation Complete: Both mapping arrays loaded."
 End Sub
