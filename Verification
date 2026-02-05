@@ -24,3 +24,67 @@ Sub Generate_Report()
     
     ' 3. Import Mapping Data (R-U and F-H)
     ' mappingData: 1:PX Name, 2:Type, 3:Parent, 4:Calc Name
+    Dim mappingData As Variant: mappingData = wsSetup.Range("R10:U" & lastRow).Value
+    ' erMapping: 1:Output Name, 2:Sheet Name, 3:Range
+    Dim erMapping As Variant: erMapping = wsSetup.Range("F10:H" & lastRow).Value
+    
+    ' 4. Refresh Verification Headers
+    For i = 1 To UBound(mappingData, 1)
+        wsReport.Cells(4, i + 4).Value = mappingData(i, 2) ' Type (Col S)
+        wsReport.Cells(5, i + 4).Value = mappingData(i, 1) ' PX Name (Col R)
+    Next i
+    
+    ' 5. List Available Files
+    Dim folderFile As Object
+    For Each folderFile In fso.GetFolder(pxPath).Files
+        If InStr(folderFile.Name, tcPrefix) > 0 Then pxFiles.Add folderFile.Path, folderFile.Name
+    Next folderFile
+    For Each folderFile In fso.GetFolder(erPath).Files
+        If InStr(folderFile.Name, "TC_") > 0 Then erFiles.Add folderFile.Path, folderFile.Name
+    Next folderFile
+    
+    ' 6. Main Loop through Test Cases
+    maxTC = IIf(pxFiles.Count > erFiles.Count, pxFiles.Count, erFiles.Count)
+    
+    For i = 1 To maxTC
+        Dim currentPXKey As String: currentPXKey = tcPrefix & i & ".json" 
+        Dim currentERKey As String: currentERKey = "TC_" & i & ".xlsx"
+        
+        wsReport.Cells(5 + i, 2).Value = currentPXKey
+        wsReport.Cells(5 + i, 3).Value = currentERKey
+        
+        ' Availability Check
+        Dim pxExists As Boolean, erExists As Boolean
+        On Error Resume Next
+        pxExists = (pxFiles(currentPXKey) <> "")
+        erExists = (erFiles(currentERKey) <> "")
+        On Error GoTo 0
+        
+        If pxExists And erExists Then
+            ' 7. Open Files & Create Results Workbook
+            Dim jsonText As String: jsonText = fso.OpenTextFile(pxFiles(currentPXKey)).ReadAll
+            Dim resultsWB As Workbook: Set resultsWB = Workbooks.Add
+            Dim erWB As Workbook: Set erWB = Workbooks.Open(erFiles(currentERKey))
+            
+            ' 8. Identify JSON Section Boundaries
+            Dim posVec As Long: posVec = InStr(jsonText, """vectors"":")
+            Dim posTDV As Long: posTDV = InStr(jsonText, """timeDependentVectors"":")
+            Dim posVIV As Long: posVIV = InStr(jsonText, """vectorsInVectors"":")
+            Dim posTDVIV As Long: posTDVIV = InStr(jsonText, """timeDependentVectorInVectors"":")
+            
+            ' 9. Process Flat Vectors (Step 15)
+            Call Process_Vectors(resultsWB, erWB, jsonText, posVec, posTDV, _
+                                mappingData, erMapping, tolerance, 5 + i, wsReport)
+            
+            ' 10. Process Vectors in Vectors (Step 16)
+            Call Process_VIV(resultsWB, erWB, jsonText, posVIV, posTDVIV, _
+                             mappingData, erMapping, tolerance, 5 + i, wsReport)
+            
+            ' 11. Cleanup
+            erWB.Close SaveChanges:=False
+            ' resultsWB.SaveAs ... (Optional)
+        End If
+    Next i
+    
+    MsgBox "Report Generation Complete.", vbInformation
+End Sub
