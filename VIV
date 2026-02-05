@@ -1,0 +1,93 @@
+Sub Process_VIV(resultsWB As Workbook, erWB As Workbook, jsonText As String, _
+                posStart As Long, posEnd As Long, mappingData As Variant, _
+                erMapping As Variant, tolerance As Double, tcRow As Long, wsReport As Worksheet)
+    
+    Dim wsVIV As Worksheet
+    Dim i As Long, j As Long, vRow As Long
+    Dim pxOutputName As String, pxParent As String, pxValue As Variant, erValue As Variant
+    Dim erOutputRef As String, erSheet As String, erRange As String
+    Dim sectionText As String, parentBlock As String, pattern As String
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    
+    ' 1. Isolate the VIV Section (Between VIV start and TDVIV start)
+    sectionText = Mid(jsonText, posStart, posEnd - posStart)
+    
+    ' 2. Create and Format VIV Sheet (Steps 2, 3 & 5)
+    Set wsVIV = resultsWB.Sheets.Add
+    wsVIV.Name = "VIV"
+    wsVIV.Range("A1:E1").Value = Array("Parent Name", "PX Output Name", "PX Value", "Expected Result Value", "Comparison Result")
+    wsVIV.Range("A1:E1").Font.Bold = True
+    wsVIV.Columns("A:B").Font.Bold = True
+    vRow = 2
+    
+    ' 3. Loop Through Mapping Data
+    For i = 1 To UBound(mappingData, 1)
+        ' Process only "vectorsInVectors" type
+        If mappingData(i, 2) = "vectorsInVectors" Then
+            
+            pxOutputName = mappingData(i, 1) ' Col R
+            pxParent = mappingData(i, 3)     ' Col T
+            erOutputRef = mappingData(i, 4)  ' Col U
+            
+            ' Skip if Expected Result name (Col U) is blank (Step 3 & 4)
+            If erOutputRef <> "" Then
+                
+                ' 4. Extract PX Value: Find Parent Block first, then the Name/Value
+                ' First, isolate the parent block to prevent grabbing same-named keys from other parents
+                pattern = """" & pxParent & """[\s\S]*?\[([\s\S]*?)\]"
+                regEx.Pattern = pattern
+                If regEx.Test(sectionText) Then
+                    parentBlock = regEx.Execute(sectionText)(0).SubMatches(0)
+                    
+                    ' Now find the value within that specific parent block
+                    pattern = """name""\s*:\s*""" & pxOutputName & """\s*,\s*""value""\s*:\s*""([^""]*)"""
+                    regEx.Pattern = pattern
+                    If regEx.Test(parentBlock) Then
+                        pxValue = regEx.Execute(parentBlock)(0).SubMatches(0)
+                    Else
+                        pxValue = "NOT FOUND IN PARENT"
+                    End If
+                Else
+                    pxValue = "PARENT NOT FOUND"
+                End If
+                
+                ' 5. Match and Extract Expected Result (Match Col U to Col F)
+                erSheet = "": erRange = ""
+                For j = 1 To UBound(erMapping, 1)
+                    If erMapping(j, 1) = erOutputRef Then 
+                        erSheet = erMapping(j, 2) ' Col G
+                        erRange = erMapping(j, 3) ' Col H
+                        Exit For
+                    End If
+                Next j
+                
+                ' 6. Populate Comparison Sheet (Step 3, 6, 7)
+                wsVIV.Cells(vRow, 1).Value = pxParent
+                wsVIV.Cells(vRow, 2).Value = erOutputRef ' Name from Calc Sheet
+                wsVIV.Cells(vRow, 3).Value = pxValue
+                
+                If erSheet <> "" And erRange <> "" Then
+                    erValue = erWB.Sheets(erSheet).Range(erRange).Value
+                    wsVIV.Cells(vRow, 4).Value = erValue
+                    
+                    ' 7. Comparison Logic with Text Fallback (Step 3 & 8)
+                    If IsNumeric(pxValue) And IsNumeric(erValue) Then
+                        wsVIV.Cells(vRow, 5).FormulaR1C1 = "=IF(ABS(RC[-2]-RC[-1])<=" & tolerance & ", 0, 1)"
+                    Else
+                        If CStr(pxValue) = CStr(erValue) Then wsVIV.Cells(vRow, 5).Value = 0 Else wsVIV.Cells(vRow, 5).Value = 1
+                    End If
+                    
+                    ' Format failures in Red (Step 8)
+                    If wsVIV.Cells(vRow, 5).Value = 1 Then wsVIV.Cells(vRow, 5).Font.Color = vbRed
+                    
+                    ' 8. Update Master Verification Report (Step 9)
+                    wsReport.Cells(tcRow, i + 4).Value = wsVIV.Cells(vRow, 5).Value
+                End If
+                
+                vRow = vRow + 1
+            End If
+        End If
+    Next i
+    
+    wsVIV.Columns("A:E").AutoFit
+End Sub
