@@ -22,15 +22,19 @@ Sub Process_Vectors(resultsWB As Workbook, erWB As Workbook, jsonText As String,
     
     ' 3. Loop Through Mapping Data
     For i = 1 To UBound(mappingData, 1)
+        ' Process only "vectors" type with no parent
         If mappingData(i, 2) = "vectors" And mappingData(i, 3) = "None" Then
             
             pxOutputName = mappingData(i, 1) 
             erOutputRef = mappingData(i, 4)  
             
             If erOutputRef <> "" Then
-                ' 4. Extract PX Value
-                pattern = """" & pxOutputName & """\s*:\s*""([^""]*)"""
+                ' 4. Extract PX Value using corrected Name/Value pattern
+                ' This pattern finds the name and captures the value on the following line
+                pattern = """name""\s*:\s*""" & pxOutputName & """\s*,\s*""value""\s*:\s*""([^""]*)"""
                 regEx.Pattern = pattern
+                regEx.Global = False
+                
                 If regEx.Test(sectionText) Then
                     pxValue = regEx.Execute(sectionText)(0).SubMatches(0)
                 Else
@@ -55,12 +59,12 @@ Sub Process_Vectors(resultsWB As Workbook, erWB As Workbook, jsonText As String,
                     erValue = erWB.Sheets(erSheet).Range(erRange).Value
                     wsV.Cells(vRow, 3).Value = erValue
                     
-                    ' 7. Robust Comparison Logic (Handles Text vs Numbers)
+                    ' 7. Comparison Logic: Numbers vs Text
                     If IsNumeric(pxValue) And IsNumeric(erValue) Then
-                        ' Use Tolerance for Numeric values
+                        ' Numeric check within tolerance
                         wsV.Cells(vRow, 4).FormulaR1C1 = "=IF(ABS(RC[-2]-RC[-1])<=" & tolerance & ", 0, 1)"
                     Else
-                        ' Fallback for Text comparison to avoid #VALUE! errors
+                        ' String/Text check to prevent #VALUE! error
                         If CStr(pxValue) = CStr(erValue) Then
                             wsV.Cells(vRow, 4).Value = 0
                         Else
@@ -68,8 +72,10 @@ Sub Process_Vectors(resultsWB As Workbook, erWB As Workbook, jsonText As String,
                         End If
                     End If
                     
-                    ' Apply Formatting
+                    ' Apply Red formatting for failures (1)
                     If wsV.Cells(vRow, 4).Value = 1 Then wsV.Cells(vRow, 4).Font.Color = vbRed
+                    
+                    ' 8. Update Master Verification Report
                     wsReport.Cells(tcRow, i + 4).Value = wsV.Cells(vRow, 4).Value
                 End If
                 
