@@ -1,0 +1,75 @@
+Sub Process_Vectors(resultsWB As Workbook, erWB As Workbook, jsonText As String, _
+                     posStart As Long, posEnd As Long, mappingData As Variant, _
+                     erMapping As Variant, tolerance As Double, tcRow As Long, wsReport As Worksheet)
+    
+    Dim wsV As Worksheet
+    Dim i As Long, j As Long, vRow As Long
+    Dim pxOutputName As String, pxValue As String
+    Dim erOutputRef As String, erSheet As String, erRange As String
+    Dim sectionText As String, pattern As String
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    
+    ' 1. Isolate the Vectors Section
+    sectionText = Mid(jsonText, posStart, posEnd - posStart)
+    
+    ' 2. Create and Format Vectors Sheet (Step 2 & 4)
+    Set wsV = resultsWB.Sheets.Add
+    wsV.Name = "Vectors"
+    wsV.Range("A1:D1").Value = Array("PX Output Name", "PX Value", "Expected Result Value", "Difference Check")
+    wsV.Range("A1:D1").Font.Bold = True
+    wsV.Columns("A").Font.Bold = True
+    vRow = 2
+    
+    ' 3. Loop Through Mapping Data (Step 3, 5, 6)
+    For i = 1 To UBound(mappingData, 1)
+        ' Only process "vectors" type where Parent is "None"
+        If mappingData(i, 2) = "vectors" And mappingData(i, 3) = "None" Then
+            
+            pxOutputName = mappingData(i, 1) ' Col R
+            erOutputRef = mappingData(i, 4)  ' Col U
+            
+            ' Skip if Calc Sheet Name is blank (Step 3)
+            If erOutputRef <> "" Then
+                
+                ' 4. Extract PX Value from JSON (Step 5)
+                pattern = """" & pxOutputName & """\s*:\s*""([^""]*)"""
+                regEx.Pattern = pattern
+                If regEx.Test(sectionText) Then
+                    pxValue = regEx.Execute(sectionText)(0).SubMatches(0)
+                Else
+                    pxValue = "NOT FOUND"
+                End If
+                
+                ' 5. Match and Extract Expected Result (Step 6)
+                erSheet = "": erRange = ""
+                For j = 1 To UBound(erMapping, 1)
+                    If erMapping(j, 1) = erOutputRef Then ' Match Col U to Col F
+                        erSheet = erMapping(j, 2) ' Col G
+                        erRange = erMapping(j, 3) ' Col H
+                        Exit For
+                    End If
+                Next j
+                
+                ' 6. Populate Comparison Sheet (Step 3, 7)
+                wsV.Cells(vRow, 1).Value = pxOutputName
+                wsV.Cells(vRow, 2).Value = pxValue
+                
+                If erSheet <> "" And erRange <> "" Then
+                    wsV.Cells(vRow, 3).Value = erWB.Sheets(erSheet).Range(erRange).Value
+                    ' Difference formula within tolerance (Step 7)
+                    wsV.Cells(vRow, 4).FormulaR1C1 = "=IF(ABS(RC[-2]-RC[-1])<=" & tolerance & ", 0, 1)"
+                    
+                    ' Conditional Formatting (Step 7)
+                    If wsV.Cells(vRow, 4).Value = 1 Then wsV.Cells(vRow, 4).Font.Color = vbRed
+                    
+                    ' 7. Update Master Verification Report (Step 8)
+                    wsReport.Cells(tcRow, i + 4).Value = wsV.Cells(vRow, 4).Value
+                End If
+                
+                vRow = vRow + 1
+            End If
+        End If
+    Next i
+    
+    wsV.Columns("A:D").AutoFit
+End Sub
