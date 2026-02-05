@@ -1,0 +1,106 @@
+Sub Process_TDVIV(resultsWB As Workbook, erWB As Workbook, jsonText As String, _
+                  posStart As Long, posEnd As Long, mappingData As Variant, _
+                  erMapping As Variant, tolerance As Double, tcRow As Long, wsReport As Worksheet)
+    
+    Dim wsTD As Worksheet
+    Dim i As Long, j As Long, k As Long, vCol As Long, vRow As Long
+    Dim pxOutputName As String, pxParent As String, erOutputRef As String
+    Dim erSheet As String, erRange As String
+    Dim sectionText As String, parentBlock As String, itemBlock As String
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
+    Dim matches As Object, m As Object
+    Dim mismatchCount As Long, totalMismatches As Long
+    Dim foundAny As Boolean: foundAny = False
+
+    ' 1. Isolate the TDVIV Section
+    If posStart = 0 Then Exit Sub
+    sectionText = Mid(jsonText, posStart, IIf(posEnd > 0, posEnd - posStart, Len(jsonText) - posStart))
+    
+    ' 2. Create Sheet
+    Set wsTD = resultsWB.Sheets.Add
+    wsTD.Name = "TDVIV"
+    vCol = 1
+    
+    ' 3. Loop Through Mapping Data for TDVIV type
+    For i = 1 To UBound(mappingData, 1)
+        If mappingData(i, 2) = "timeDependentVe" Then ' Match Col S
+            
+            pxOutputName = mappingData(i, 1) 
+            pxParent = mappingData(i, 3)     
+            erOutputRef = mappingData(i, 4)
+            
+            If erOutputRef <> "" Then
+                foundAny = True
+                mismatchCount = 0
+                
+                ' Headers: Row 1 Parent, Row 2 Names
+                wsTD.Cells(1, vCol).Value = pxParent
+                wsTD.Cells(2, vCol).Value = "t"
+                wsTD.Cells(2, vCol + 1).Value = pxOutputName & " (PX)"
+                wsTD.Cells(2, vCol + 2).Value = pxOutputName & " (ER)"
+                wsTD.Cells(2, vCol + 3).Value = "Check"
+                wsTD.Range(wsTD.Cells(1, vCol), wsTD.Cells(2, vCol + 3)).Font.Bold = True
+                
+                ' 4. Extract Parent Block and then the specific Item Array
+                regEx.Pattern = """" & pxParent & """[\s\S]*?\[([\s\S]*?)\]"
+                If regEx.Test(sectionText) Then
+                    parentBlock = regEx.Execute(sectionText)(0).SubMatches(0)
+                    
+                    ' Find the specific output name and its timeDependentValues array
+                    regEx.Pattern = """name""\s*:\s*""" & pxOutputName & """[\s\S]*?""timeDependentValues""\s*:\s*\[([\s\S]*?)\]"
+                    If regEx.Test(parentBlock) Then
+                        itemBlock = regEx.Execute(parentBlock)(0).SubMatches(0)
+                        
+                        ' Parse t and value pairs
+                        regEx.Pattern = """t""\s*:\s*(\d+)\s*,\s*""value""\s*:\s*""([^""]*)"""
+                        regEx.Global = True
+                        Set matches = regEx.Execute(itemBlock)
+                        
+                        ' 5. Match Expected Result Range
+                        erSheet = "": erRange = ""
+                        For j = 1 To UBound(erMapping, 1)
+                            If erMapping(j, 1) = erOutputRef Then
+                                erSheet = erMapping(j, 2): erRange = erMapping(j, 3): Exit For
+                            End If
+                        Next j
+                        
+                        ' 6. Populate Table and Compare
+                        vRow = 3
+                        Dim erData As Variant
+                        If erSheet <> "" Then erData = erWB.Sheets(erSheet).Range(erRange).Value
+                        
+                        For Each m In matches
+                            wsTD.Cells(vRow, vCol).Value = m.SubMatches(0) ' t
+                            wsTD.Cells(vRow, vCol + 1).Value = m.SubMatches(1) ' PX Value
+                            
+                            ' Fetch corresponding ER value from the array
+                            If IsArray(erData) Then
+                                If (vRow - 2) <= UBound(erData, 1) Then
+                                    wsTD.Cells(vRow, vCol + 2).Value = erData(vRow - 2, 1)
+                                End If
+                            Else
+                                wsTD.Cells(vRow, vCol + 2).Value = erData ' Single cell fallback
+                            End If
+                            
+                            ' Comparison
+                            wsTD.Cells(vRow, vCol + 3).FormulaR1C1 = "=IF(ABS(RC[-2]-RC[-1])<=" & tolerance & ", 0, 1)"
+                            If wsTD.Cells(vRow, vCol + 3).Value = 1 Then 
+                                wsTD.Cells(vRow, vCol + 3).Font.Color = vbRed
+                                mismatchCount = mismatchCount + 1
+                            End If
+                            vRow = vRow + 1
+                        Next m
+                    End If
+                End If
+                
+                ' 7. Update Report with Mismatch Sum
+                wsReport.Cells(tcRow, i + 4).Value = mismatchCount
+                totalMismatches = totalMismatches + mismatchCount
+                vCol = vCol + 5 ' Move to next block
+            End If
+        End If
+    Next i
+    
+    If Not foundAny Then wsReport.Cells(tcRow, 4).Value = "No PX output generated" '
+    wsTD.Columns.AutoFit
+End Sub
