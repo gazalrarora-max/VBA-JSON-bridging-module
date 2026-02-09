@@ -6,40 +6,39 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
     Set wsTD = resWB.Sheets.Add: wsTD.Name = "TDVIV": vC = 1
 
     For i = 1 To UBound(mD, 1)
-        If mD(i, 2) = "timeDependentVectorInVectors" Then
+        ' Check 1: Must be TDVIV type AND Column U (mD(i, 4)) must NOT be blank
+        If mD(i, 2) = "timeDependentVectorInVectors" And Trim(mD(i, 4) & "") <> "" Then
+            
             regEx.Global = False
-            ' Find Parent Block
-            regEx.Pattern = """name""\s*:\s*""" & mD(i, 3) & """[\s\S]*?""timeDependentVectors""\s*:\s*\["
+            regEx.Pattern = """name""\s*:\s*""" & mD(i, 3) & """[\s\S]*?\["
             
             If regEx.Test(sTxt) Then
                 pB = Mid(sTxt, regEx.Execute(sTxt)(0).FirstIndex + 1)
-                ' Find Child Output and Value Array
                 regEx.Pattern = """name""\s*:\s*""" & mD(i, 1) & """[\s\S]*?""timeDependentValues""\s*:\s*\[([\s\S]*?)\]"
                 
                 If regEx.Test(pB) Then
                     iB = regEx.Execute(pB)(0).SubMatches(0)
                     
-                    ' Find the ER Mapping Row
                     Dim matchFound As Boolean: matchFound = False
                     Dim erData As Variant
                     
+                    ' Find the ER Mapping Row
                     For j = 1 To UBound(erM, 1)
                         If erM(j, 1) = mD(i, 4) Then
                             erData = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
                             matchFound = True
-                            Exit For ' Exit j loop once mapping is found
+                            Exit For 
                         End If
                     Next j
                     
                     If matchFound Then
-                        ' Setup Headers
                         wsTD.Cells(1, vC).Value = mD(i, 3)
                         wsTD.Cells(2, vC).Value = "t"
                         wsTD.Cells(2, vC + 1).Value = mD(i, 1) & "(PX)"
                         wsTD.Cells(2, vC + 2).Value = "ER Value"
                         wsTD.Cells(2, vC + 3).Value = "Check"
+                        wsTD.Range(wsTD.Cells(1, vC), wsTD.Cells(2, vC + 3)).Font.Bold = True
                         
-                        ' Parse time-series
                         regEx.Global = True
                         regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
                         Set m = regEx.Execute(iB): vR = 3: mC = 0
@@ -48,7 +47,6 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
                             wsTD.Cells(vR, vC).Value = k.SubMatches(0)
                             wsTD.Cells(vR, vC + 1).Value = k.SubMatches(1)
                             
-                            ' Compare
                             Dim curER As Variant: curER = IIf(IsArray(erData), erData(vR - 2, 1), erData)
                             wsTD.Cells(vR, vC + 2).Value = curER
                             
@@ -60,6 +58,9 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
                                     wsTD.Cells(vR, vC + 3).Font.Color = vbRed
                                     mC = mC + 1
                                 End If
+                            Else
+                                wsTD.Cells(vR, vC + 3).Value = IIf(k.SubMatches(1) = CStr(curER), 0, 1)
+                                If wsTD.Cells(vR, vC + 3).Value = 1 Then mC = mC + 1
                             End If
                             vR = vR + 1
                         Next k
