@@ -1,74 +1,71 @@
 Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Long, pE As Long, mD As Variant, erM As Variant, tol As Double, tcR As Long, wsR As Worksheet)
-    Dim wsTD As Worksheet, i As Long, j As Long, vC As Long, vR As Long, sTxt As String, pB As String, iB As String, mC As Long, m As Object
+    Dim wsTD As Worksheet, i As Long, j As Long, vC As Long, vR As Long, sTxt As String, pB As String, iB As String, mC As Long, m As Object, k As Object
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp"): If pS <= 0 Then Exit Sub
     
-    ' 1. Slicing logic: Capture from TDVIV header to the end of the file
     sTxt = IIf(pE > pS, Mid(jTxt, pS, pE - pS), Mid(jTxt, pS))
     Set wsTD = resWB.Sheets.Add: wsTD.Name = "TDVIV": vC = 1
 
     For i = 1 To UBound(mD, 1)
         If mD(i, 2) = "timeDependentVectorInVectors" Then
-            ' 2. Target the Parent Object (e.g., "illustrationOfBenefits_Policy")
             regEx.Global = False
+            ' Find Parent Block
             regEx.Pattern = """name""\s*:\s*""" & mD(i, 3) & """[\s\S]*?""timeDependentVectors""\s*:\s*\["
             
             If regEx.Test(sTxt) Then
-                ' Capture block starting from this parent
                 pB = Mid(sTxt, regEx.Execute(sTxt)(0).FirstIndex + 1)
-                
-                ' 3. Target the Child Output Name (e.g., "PolicyYear")
+                ' Find Child Output and Value Array
                 regEx.Pattern = """name""\s*:\s*""" & mD(i, 1) & """[\s\S]*?""timeDependentValues""\s*:\s*\[([\s\S]*?)\]"
                 
                 If regEx.Test(pB) Then
                     iB = regEx.Execute(pB)(0).SubMatches(0)
                     
-                    ' Setup Table Headers
-                    wsTD.Cells(1, vC).Value = mD(i, 3) ' Parent Name
-                    wsTD.Cells(2, vC).Value = "t"
-                    wsTD.Cells(2, vC + 1).Value = mD(i, 1) & "(PX)"
-                    wsTD.Cells(2, vC + 2).Value = "ER Value"
-                    wsTD.Cells(2, vC + 3).Value = "Check"
-                    wsTD.Range(wsTD.Cells(1, vC), wsTD.Cells(2, vC + 3)).Font.Bold = True
+                    ' Find the ER Mapping Row
+                    Dim matchFound As Boolean: matchFound = False
+                    Dim erData As Variant
                     
-                    ' 4. Extract t and value pairs - Handles quotes as seen in image
-                    regEx.Global = True
-                    regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
-                    Set m = regEx.Execute(iB): vR = 3: mC = 0
+                    For j = 1 To UBound(erM, 1)
+                        If erM(j, 1) = mD(i, 4) Then
+                            erData = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
+                            matchFound = True
+                            Exit For ' Exit j loop once mapping is found
+                        End If
+                    Next j
                     
-                    ' 5. Match ER Mapping
-                    For j = 1 To UBound(erM, 1): If erM(j, 1) = mD(i, 4) Then
-                        Dim eD As Variant: eD = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
+                    If matchFound Then
+                        ' Setup Headers
+                        wsTD.Cells(1, vC).Value = mD(i, 3)
+                        wsTD.Cells(2, vC).Value = "t"
+                        wsTD.Cells(2, vC + 1).Value = mD(i, 1) & "(PX)"
+                        wsTD.Cells(2, vC + 2).Value = "ER Value"
+                        wsTD.Cells(2, vC + 3).Value = "Check"
+                        
+                        ' Parse time-series
+                        regEx.Global = True
+                        regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
+                        Set m = regEx.Execute(iB): vR = 3: mC = 0
                         
                         For Each k In m
-                            wsTD.Cells(vR, vC).Value = k.SubMatches(0) ' t
-                            wsTD.Cells(vR, vC + 1).Value = k.SubMatches(1) ' PX Value (String)
+                            wsTD.Cells(vR, vC).Value = k.SubMatches(0)
+                            wsTD.Cells(vR, vC + 1).Value = k.SubMatches(1)
                             
-                            ' Fetch ER value from array
-                            Dim currentER As Variant
-                            currentER = IIf(IsArray(eD), eD(vR - 2, 1), eD)
-                            wsTD.Cells(vR, vC + 2).Value = currentER
+                            ' Compare
+                            Dim curER As Variant: curER = IIf(IsArray(erData), erData(vR - 2, 1), erData)
+                            wsTD.Cells(vR, vC + 2).Value = curER
                             
-                            ' 6. Numerical Comparison with Tolerance
-                            ' Using CDbl to ensure the JSON string "1" is treated as number 1
-                            If IsNumeric(k.SubMatches(1)) And IsNumeric(currentER) Then
-                                If Abs(CDbl(k.SubMatches(1)) - CDbl(currentER)) <= tol Then
+                            If IsNumeric(k.SubMatches(1)) And IsNumeric(curER) Then
+                                If Abs(CDbl(k.SubMatches(1)) - CDbl(curER)) <= tol Then
                                     wsTD.Cells(vR, vC + 3).Value = 0
                                 Else
                                     wsTD.Cells(vR, vC + 3).Value = 1
                                     wsTD.Cells(vR, vC + 3).Font.Color = vbRed
                                     mC = mC + 1
                                 End If
-                            Else
-                                ' Fallback for non-numeric text comparison
-                                wsTD.Cells(vR, vC + 3).Value = IIf(k.SubMatches(1) = CStr(currentER), 0, 1)
-                                If wsTD.Cells(vR, vC + 3).Value = 1 Then mC = mC + 1
                             End If
                             vR = vR + 1
                         Next k
-                        ' Record total mismatches in main report
                         wsR.Cells(tcR, i + 4).Value = mC
-                        vC = vC + 5: Exit For
-                    End If: Next j
+                        vC = vC + 5
+                    End If
                 End If
             End If
         End If
