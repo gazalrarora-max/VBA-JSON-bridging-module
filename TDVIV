@@ -1,109 +1,77 @@
-Sub Process_TDVIV(resultsWB As Workbook, erWB As Workbook, jsonText As String, _
-                  posStart As Long, posEnd As Long, mappingData As Variant, _
-                  erMapping As Variant, tolerance As Double, tcRow As Long, wsReport As Worksheet)
+Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Long, pE As Long, mD As Variant, erM As Variant, tol As Double, tcR As Long, wsR As Worksheet)
+    Dim wsTD As Worksheet, i As Long, j As Long, vC As Long, vR As Long, sTxt As String, pB As String, iB As String, mC As Long, m As Object
+    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp"): If pS <= 0 Then Exit Sub
     
-    Dim wsTD As Worksheet
-    Dim i As Long, j As Long, k As Long, vCol As Long, vRow As Long
-    Dim pxOutputName As String, pxParent As String, erOutputRef As String
-    Dim erSheet As String, erRange As String
-    Dim sectionText As String, parentBlock As String, itemBlock As String
-    Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp")
-    Dim matches As Object, m As Object
-    Dim mismatchCount As Long
-    Dim foundAny As Boolean: foundAny = False
+    ' 1. Slicing logic: Capture from TDVIV header to the end of the file
+    sTxt = IIf(pE > pS, Mid(jTxt, pS, pE - pS), Mid(jTxt, pS))
+    Set wsTD = resWB.Sheets.Add: wsTD.Name = "TDVIV": vC = 1
 
-    ' 1. Safety Check: If posStart is 0, the TDVIV section doesn't exist in this JSON
-    If posStart <= 0 Then 
-        wsReport.Cells(tcRow, 4).Value = "TDVIV Section Missing"
-        Exit Sub
-    End If
-    
-    ' 2. Corrected String Extraction to avoid Invalid Procedure Call
-    ' Ensuring we don't pass a 0 or negative length to Mid
-    If posEnd > posStart Then
-        sectionText = Mid(jsonText, posStart, posEnd - posStart)
-    Else
-        sectionText = Mid(jsonText, posStart) ' Extract from posStart to the end of JSON
-    End If
-    
-    ' 3. Create Sheet
-    Set wsTD = resultsWB.Sheets.Add
-    wsTD.Name = "TDVIV"
-    vCol = 1
-    
-    ' 4. Loop Through Mapping Data
-    For i = 1 To UBound(mappingData, 1)
-        If mappingData(i, 2) = "timeDependentVe" Then 
+    For i = 1 To UBound(mD, 1)
+        If mD(i, 2) = "timeDependentVectorInVectors" Then
+            ' 2. Target the Parent Object (e.g., "illustrationOfBenefits_Policy")
+            regEx.Global = False
+            regEx.Pattern = """name""\s*:\s*""" & mD(i, 3) & """[\s\S]*?""timeDependentVectors""\s*:\s*\["
             
-            pxOutputName = mappingData(i, 1) 
-            pxParent = mappingData(i, 3)     
-            erOutputRef = mappingData(i, 4)
-            
-            If erOutputRef <> "" Then
-                foundAny = True
-                mismatchCount = 0
+            If regEx.Test(sTxt) Then
+                ' Capture block starting from this parent
+                pB = Mid(sTxt, regEx.Execute(sTxt)(0).FirstIndex + 1)
                 
-                ' Headers
-                wsTD.Cells(1, vCol).Value = pxParent
-                wsTD.Cells(2, vCol).Value = "t"
-                wsTD.Cells(2, vCol + 1).Value = pxOutputName & " (PX)"
-                wsTD.Cells(2, vCol + 2).Value = pxOutputName & " (ER)"
-                wsTD.Cells(2, vCol + 3).Value = "Check"
-                wsTD.Range(wsTD.Cells(1, vCol), wsTD.Cells(2, vCol + 3)).Font.Bold = True
+                ' 3. Target the Child Output Name (e.g., "PolicyYear")
+                regEx.Pattern = """name""\s*:\s*""" & mD(i, 1) & """[\s\S]*?""timeDependentValues""\s*:\s*\[([\s\S]*?)\]"
                 
-                ' 5. Extract Parent and Item Blocks
-                regEx.Pattern = """" & pxParent & """[\s\S]*?\[([\s\S]*?)\]"
-                If regEx.Test(sectionText) Then
-                    parentBlock = regEx.Execute(sectionText)(0).SubMatches(0)
+                If regEx.Test(pB) Then
+                    iB = regEx.Execute(pB)(0).SubMatches(0)
                     
-                    regEx.Pattern = """name""\s*:\s*""" & pxOutputName & """[\s\S]*?""timeDependentValues""\s*:\s*\[([\s\S]*?)\]"
-                    If regEx.Test(parentBlock) Then
-                        itemBlock = regEx.Execute(parentBlock)(0).SubMatches(0)
+                    ' Setup Table Headers
+                    wsTD.Cells(1, vC).Value = mD(i, 3) ' Parent Name
+                    wsTD.Cells(2, vC).Value = "t"
+                    wsTD.Cells(2, vC + 1).Value = mD(i, 1) & "(PX)"
+                    wsTD.Cells(2, vC + 2).Value = "ER Value"
+                    wsTD.Cells(2, vC + 3).Value = "Check"
+                    wsTD.Range(wsTD.Cells(1, vC), wsTD.Cells(2, vC + 3)).Font.Bold = True
+                    
+                    ' 4. Extract t and value pairs - Handles quotes as seen in image
+                    regEx.Global = True
+                    regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
+                    Set m = regEx.Execute(iB): vR = 3: mC = 0
+                    
+                    ' 5. Match ER Mapping
+                    For j = 1 To UBound(erM, 1): If erM(j, 1) = mD(i, 4) Then
+                        Dim eD As Variant: eD = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
                         
-                        regEx.Pattern = """t""\s*:\s*(\d+)\s*,\s*""value""\s*:\s*""([^""]*)"""
-                        regEx.Global = True
-                        Set matches = regEx.Execute(itemBlock)
-                        
-                        ' 6. Match Expected Result
-                        erSheet = "": erRange = ""
-                        For j = 1 To UBound(erMapping, 1)
-                            If erMapping(j, 1) = erOutputRef Then
-                                erSheet = erMapping(j, 2): erRange = erMapping(j, 3): Exit For
-                            End If
-                        Next j
-                        
-                        vRow = 3
-                        Dim erData As Variant
-                        If erSheet <> "" Then erData = erWB.Sheets(erSheet).Range(erRange).Value
-                        
-                        ' 7. Compare Values
-                        For Each m In matches
-                            wsTD.Cells(vRow, vCol).Value = m.SubMatches(0) ' t
-                            wsTD.Cells(vRow, vCol + 1).Value = m.SubMatches(1) ' PX Value
+                        For Each k In m
+                            wsTD.Cells(vR, vC).Value = k.SubMatches(0) ' t
+                            wsTD.Cells(vR, vC + 1).Value = k.SubMatches(1) ' PX Value (String)
                             
-                            If IsArray(erData) Then
-                                If (vRow - 2) <= UBound(erData, 1) Then wsTD.Cells(vRow, vCol + 2).Value = erData(vRow - 2, 1)
+                            ' Fetch ER value from array
+                            Dim currentER As Variant
+                            currentER = IIf(IsArray(eD), eD(vR - 2, 1), eD)
+                            wsTD.Cells(vR, vC + 2).Value = currentER
+                            
+                            ' 6. Numerical Comparison with Tolerance
+                            ' Using CDbl to ensure the JSON string "1" is treated as number 1
+                            If IsNumeric(k.SubMatches(1)) And IsNumeric(currentER) Then
+                                If Abs(CDbl(k.SubMatches(1)) - CDbl(currentER)) <= tol Then
+                                    wsTD.Cells(vR, vC + 3).Value = 0
+                                Else
+                                    wsTD.Cells(vR, vC + 3).Value = 1
+                                    wsTD.Cells(vR, vC + 3).Font.Color = vbRed
+                                    mC = mC + 1
+                                End If
                             Else
-                                wsTD.Cells(vRow, vCol + 2).Value = erData 
+                                ' Fallback for non-numeric text comparison
+                                wsTD.Cells(vR, vC + 3).Value = IIf(k.SubMatches(1) = CStr(currentER), 0, 1)
+                                If wsTD.Cells(vR, vC + 3).Value = 1 Then mC = mC + 1
                             End If
-                            
-                            wsTD.Cells(vRow, vCol + 3).FormulaR1C1 = "=IF(ABS(RC[-2]-RC[-1])<=" & tolerance & ", 0, 1)"
-                            If wsTD.Cells(vRow, vCol + 3).Value = 1 Then 
-                                wsTD.Cells(vRow, vCol + 3).Font.Color = vbRed
-                                mismatchCount = mismatchCount + 1
-                            End If
-                            vRow = vRow + 1
-                        Next m
-                    End If
+                            vR = vR + 1
+                        Next k
+                        ' Record total mismatches in main report
+                        wsR.Cells(tcR, i + 4).Value = mC
+                        vC = vC + 5: Exit For
+                    End If: Next j
                 End If
-                
-                ' 8. Update Report
-                wsReport.Cells(tcRow, i + 4).Value = mismatchCount
-                vCol = vCol + 5 
             End If
         End If
     Next i
-    
-    If Not foundAny Then wsReport.Cells(tcRow, 4).Value = "No TDVIV Found"
     wsTD.Columns.AutoFit
 End Sub
