@@ -38,4 +38,66 @@ Sub Generate_Report()
     For Each folderFile In fso.GetFolder(pxPath).Files
         If InStr(folderFile.Name, tcPrefix) > 0 Then 
             pxFiles.Add folderFile.Path, folderFile.Name
-            tcNum = Val(Replace(Replace(folderFile.Name, tcPrefix, ""), ".json
+            tcNum = Val(Replace(Replace(folderFile.Name, tcPrefix, ""), ".json", ""))
+            If tcNum > pxMax Then pxMax = tcNum
+        End If
+    Next folderFile
+    For Each folderFile In fso.GetFolder(erPath).Files
+        If InStr(folderFile.Name, "TC_") > 0 Then 
+            erFiles.Add folderFile.Path, folderFile.Name
+            tcNum = Val(Replace(Replace(folderFile.Name, "TC_", ""), ".xlsx", ""))
+            If tcNum > erMax Then erMax = tcNum
+        End If
+    Next folderFile
+    
+    ' 6. Main Loop
+    maxTC = IIf(pxMax > erMax, pxMax, erMax)
+    For i = 1 To maxTC
+        Dim currentPXKey As String: currentPXKey = tcPrefix & i & ".json" 
+        Dim currentERKey As String: currentERKey = "TC_" & i & ".xlsx"
+        Dim reportRow As Long: reportRow = 5 + i
+        wsReport.Cells(reportRow, 2).Value = currentPXKey
+        wsReport.Cells(reportRow, 3).Value = currentERKey
+        
+        Dim pxExists As Boolean: pxExists = False
+        Dim erExists As Boolean: erExists = False
+        On Error Resume Next
+        pxExists = (pxFiles(currentPXKey) <> "")
+        erExists = (erFiles(currentERKey) <> "")
+        On Error GoTo 0
+        
+        If pxExists And erExists Then
+            Dim jsonText As String: jsonText = fso.OpenTextFile(pxFiles(currentPXKey)).ReadAll
+            Dim resultsWB As Workbook: Set resultsWB = Workbooks.Add
+            Dim erWB As Workbook: Set erWB = Workbooks.Open(erFiles(currentERKey))
+            
+            ' 9. Identify Sections
+            Dim pV As Long: pV = InStr(jsonText, """vectors"":")
+            Dim pTDV As Long: pTDV = InStr(jsonText, """timeDependentVectors"":")
+            Dim pVIV As Long: pVIV = InStr(jsonText, """vectorsInVectors"":")
+            Dim pTDVIV As Long: pTDVIV = InStr(jsonText, """timeDependentVectorInVectors"":")
+            
+            ' 10. Call Sub-Macros
+            Call Process_Vectors(resultsWB, erWB, jsonText, pV, pTDV, mappingData, erMapping, tolerance, reportRow, wsReport)
+            Call Process_VIV(resultsWB, erWB, jsonText, pVIV, pTDVIV, mappingData, erMapping, tolerance, reportRow, wsReport)
+            Call Process_TDVIV(resultsWB, erWB, jsonText, pTDVIV, 0, mappingData, erMapping, tolerance, reportRow, wsReport)
+            
+            ' 11. Cleanup & Save
+            Dim ws As Worksheet: Application.DisplayAlerts = False
+            For Each ws In resultsWB.Worksheets
+                If ws.UsedRange.Cells.Count = 1 And ws.Cells(1, 1).Value = "" Then
+                    If resultsWB.Worksheets.Count > 1 Then ws.Delete
+                End If
+            Next ws
+            wsReport.Cells(reportRow, 4).Value = "Done"
+            wsReport.Cells(reportRow, 4).Font.Color = vbGreen
+            
+            Dim sFol As String: sFol = ThisWorkbook.Path & "\Detailed_Results"
+            If fso.FolderExists(sFol) = False Then fso.CreateFolder(sFol)
+            resultsWB.SaveAs sFol & "\Result_TC" & i & ".xlsx": resultsWB.Close: erWB.Close: Application.DisplayAlerts = True
+        Else
+            wsReport.Cells(reportRow, 4).Value = IIf(Not pxExists, "PX Missing", "ER Missing"): wsReport.Cells(reportRow, 4).Font.Color = vbRed
+        End If
+    Next i
+    MsgBox "Complete!"
+End Sub
