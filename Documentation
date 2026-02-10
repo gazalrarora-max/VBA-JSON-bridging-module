@@ -2,24 +2,27 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
     Dim wsTD As Worksheet, i As Long, j As Long, vC As Long, vR As Long, sTxt As String, pB As String, iB As String, mC As Long, m As Object, k As Object
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp"): If pS <= 0 Then Exit Sub
     
+    ' Extract the TDVIV block from the JSON
     sTxt = IIf(pE > pS, Mid(jTxt, pS, pE - pS), Mid(jTxt, pS))
     Set wsTD = resWB.Sheets.Add: wsTD.Name = "TDVIV": vC = 1
 
     For i = 1 To UBound(mD, 1)
-        ' Check: Must be TDVIV type and have a mapping reference in Column U
+        ' Process if TDVIV and Column U is populated
         If mD(i, 2) = "timeDependentVectorInVectors" And Trim(mD(i, 4) & "") <> "" Then
             
             regEx.Global = False
+            ' Find the Parent Object in JSON
             regEx.Pattern = """name""\s*:\s*""" & mD(i, 3) & """[\s\S]*?""timeDependentVectors""\s*:\s*\["
             
             If regEx.Test(sTxt) Then
                 pB = Mid(sTxt, regEx.Execute(sTxt)(0).FirstIndex + 1)
+                ' Find the specific Child Output Name
                 regEx.Pattern = """name""\s*:\s*""" & mD(i, 1) & """[\s\S]*?""timeDependentValues""\s*:\s*\[([\s\S]*?)\]"
                 
                 If regEx.Test(pB) Then
                     iB = regEx.Execute(pB)(0).SubMatches(0)
                     
-                    ' Load PX data into Dictionary for Age-based comparison
+                    ' Build a Dictionary of JSON values indexed by "t"
                     Dim pxData As Object: Set pxData = CreateObject("Scripting.Dictionary")
                     regEx.Global = True
                     regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
@@ -28,38 +31,36 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
                         pxData(CStr(k.SubMatches(0))) = k.SubMatches(1)
                     Next k
                     
-                    ' Find ER Mapping and Populate
+                    ' Find the ER Mapping
                     For j = 1 To UBound(erM, 1)
                         If erM(j, 1) = mD(i, 4) Then
                             Dim erRangeData As Variant
                             erRangeData = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
                             
-                            ' Header Setup
-                            wsTD.Cells(1, vC).Value = mD(i, 3)
-                            wsTD.Cells(2, vC).Value = "t (Age)"
+                            ' Setup Results Sheet Columns
+                            wsTD.Cells(1, vC).Value = mD(i, 3) ' Parent Name
+                            wsTD.Cells(2, vC).Value = "Key (Age/Year)"
                             wsTD.Cells(2, vC + 1).Value = mD(i, 1) & " (PX)"
                             wsTD.Cells(2, vC + 2).Value = "ER Value"
                             wsTD.Cells(2, vC + 3).Value = "Check"
                             wsTD.Range(wsTD.Cells(1, vC), wsTD.Cells(2, vC + 3)).Font.Bold = True
                             
                             vR = 3: mC = 0
-                            ' Iterate based on ER Ages as shown in the screenshot
+                            ' Loop through the independent ER Key column
                             Dim rowIdx As Long
                             For rowIdx = 1 To UBound(erRangeData, 1)
-                                Dim currentAge As String
-                                currentAge = CStr(erRangeData(rowIdx, 1))
+                                Dim currentKey As String: currentKey = CStr(erRangeData(rowIdx, 1))
+                                wsTD.Cells(vR, vC).Value = currentKey
                                 
-                                wsTD.Cells(vR, vC).Value = currentAge ' Column F equivalent
-                                
-                                ' Perform Lookup against PX data
-                                If pxData.Exists(currentAge) Then
-                                    Dim valPX As Variant: valPX = pxData(currentAge)
-                                    Dim valER As Variant: valER = erRangeData(rowIdx, 2) ' Column G equivalent
+                                ' Independent Lookup: Match ER Key directly to JSON "t"
+                                If pxData.Exists(currentKey) Then
+                                    Dim valPX As Variant: valPX = pxData(currentKey)
+                                    Dim valER As Variant: valER = erRangeData(rowIdx, 2)
                                     
                                     wsTD.Cells(vR, vC + 1).Value = valPX
                                     wsTD.Cells(vR, vC + 2).Value = valER
                                     
-                                    ' Comparison logic
+                                    ' Comparison with Numeric conversion
                                     If IsNumeric(valPX) And IsNumeric(valER) Then
                                         If Abs(CDbl(valPX) - CDbl(valER)) <= tol Then
                                             wsTD.Cells(vR, vC + 3).Value = 0
@@ -69,15 +70,15 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
                                         End If
                                     End If
                                 Else
-                                    ' If age listed in ER calculation sheet is missing from JSON
-                                    wsTD.Cells(vR, vC + 1).Value = "Missing in PX"
+                                    ' Key not found in JSON
+                                    wsTD.Cells(vR, vC + 1).Value = "Key Missing in PX"
                                     wsTD.Cells(vR, vC + 3).Value = 1: mC = mC + 1
                                 End If
                                 vR = vR + 1
                             Next rowIdx
                             
-                            ' Summary for Verification Report
-                            wsR.Cells(tcRow, i + 4).Value = mC
+                            ' Summary Update
+                            wsR.Cells(tcR, i + 4).Value = mC
                             vC = vC + 5: Exit For
                         End If
                     Next j
