@@ -1,0 +1,76 @@
+Sub CRR_Engine_Process()
+    Dim engineWS As Worksheet
+    Dim dataWB As Workbook
+    Dim dataWS As Worksheet
+    Dim dataFilePath As String
+    Dim lastRow As Long, i As Long
+    Dim scoreCol As Long, ratingCol As Long
+    Dim riskMap As Variant
+    Dim r As Integer
+    
+    Set engineWS = ThisWorkbook.Sheets("Automation")
+    
+    ' 1. Get the data file name/path
+    dataFilePath = engineWS.Range("D4").Value
+    
+    ' 2 & 3. Load Mapping Table (Adjust range to match your table)
+    ' Format: Risk Name | Data Col Reference Cell | Target Range Name/Address
+    riskMap = engineWS.Range("B11:D15").Value ' Adjust as per your actual table row range
+    
+    ' 4. Open the data file
+    On Error Resume Next
+    Set dataWB = Workbooks.Open(dataFilePath)
+    On Error GoTo 0
+    
+    If dataWB Is Nothing Then
+        MsgBox "Data file not found at: " & dataFilePath, vbCritical
+        Exit Sub
+    End If
+    
+    Set dataWS = dataWB.Sheets(1) ' Assumes data is on first sheet
+    
+    ' 5. Setup Headers
+    lastRow = dataWS.Cells(dataWS.Rows.Count, 1).End(xlUp).Row
+    scoreCol = dataWS.Cells(1, dataWS.Columns.Count).End(xlToLeft).Column + 1
+    ratingCol = scoreCol + 1
+    
+    dataWS.Cells(1, scoreCol).Value = "CRR Score"
+    dataWS.Cells(1, ratingCol).Value = "CRR Rating"
+    
+    ' Speed Optimization
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    
+    ' 6. Loop through each case (Row 2 to Last)
+    For i = 2 To lastRow
+        
+        ' For each risk defined in the table
+        For r = LBound(riskMap) To UBound(riskMap)
+            Dim colRef As String
+            Dim targetAddress As String
+            
+            ' Get the column letter from the cell referenced in mapping (e.g., value of C11)
+            colRef = engineWS.Range(riskMap(r, 2)).Value 
+            targetAddress = riskMap(r, 3)
+            
+            ' Place data from Data File into the Engine's extraction range
+            engineWS.Range(targetAddress).Value = dataWS.Cells(i, colRef).Value
+        Next r
+        
+        ' 7. Recalculate and Extract Results
+        Application.Calculate
+        
+        ' 8. Store results back in Data File
+        dataWS.Cells(i, scoreCol).Value = engineWS.Range("Overall_Score").Value
+        dataWS.Cells(i, ratingCol).Value = engineWS.Range("Overall_Rating").Value
+    Next i
+    
+    ' 9. Finalize
+    dataWB.Save
+    ' dataWB.Close ' Uncomment if you want it to close automatically
+    
+    Application.Calculation = xlCalculationAutomatic
+    Application.ScreenUpdating = True
+    
+    MsgBox "CRR Tool successfully processed " & (lastRow - 1) & " cases.", vbInformation
+End Sub
