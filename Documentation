@@ -3,12 +3,11 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
     Dim regEx As Object: Set regEx = CreateObject("VBScript.RegExp"): If pS <= 0 Then Exit Sub
     
     sTxt = IIf(pE > pS, Mid(jTxt, pS, pE - pS), Mid(jTxt, pS))
-    Set wsTD = resWB.Sheets.Add: wsTD.Name = "TDVIV": vC = 1
+    Set wsTD = resWB.Sheets.Add: wsTD.Name = "TDVIV"
+    vC = 1
 
     For i = 1 To UBound(mD, 1)
-        ' Process only if Column U is not blank
         If mD(i, 2) = "timeDependentVectorInVectors" And Trim(mD(i, 4) & "") <> "" Then
-            
             regEx.Global = False
             regEx.Pattern = """name""\s*:\s*""" & mD(i, 3) & """[\s\S]*?\["
             
@@ -18,57 +17,47 @@ Sub Process_TDVIV(resWB As Workbook, erWB As Workbook, jTxt As String, pS As Lon
                 
                 If regEx.Test(pB) Then
                     iB = regEx.Execute(pB)(0).SubMatches(0)
-                    
-                    ' Header Setup
-                    wsTD.Cells(1, vC).Value = mD(i, 3)
-                    wsTD.Cells(2, vC).Value = "Key (Age/Year)"
-                    wsTD.Cells(2, vC + 1).Value = mD(i, 1) & " (PX)"
-                    wsTD.Cells(2, vC + 2).Value = "ER Value"
-                    wsTD.Cells(2, vC + 3).Value = "Check"
-                    wsTD.Range(wsTD.Cells(1, vC), wsTD.Cells(2, vC + 3)).Font.Bold = True
-                    
-                    ' Extract JSON values to sheet
-                    regEx.Global = True
-                    regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
-                    Set m = regEx.Execute(iB): vR = 3
-                    For Each k In m
-                        wsTD.Cells(vR, vC).Value = k.SubMatches(0)
-                        wsTD.Cells(vR, vC + 1).Value = k.SubMatches(1)
-                        vR = vR + 1
-                    Next k
-                    
-                    ' Find ER Mapping
                     For j = 1 To UBound(erM, 1)
                         If erM(j, 1) = mD(i, 4) Then
-                            Dim erData As Variant
-                            erData = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
+                            Dim erData As Variant: erData = erWB.Sheets(CStr(erM(j, 2))).Range(CStr(erM(j, 3))).Value
                             
-                            vR = 3: mC = 0
-                            ' Paste ER Data and Apply VLOOKUP Formula
-                            Dim rowIdx As Long
-                            For rowIdx = 1 To UBound(erData, 1)
-                                wsTD.Cells(vR, vC + 2).Value = erData(rowIdx, 2)
+                            wsTD.Cells(1, vC).Value = mD(i, 3): wsTD.Cells(2, vC).Value = "t"
+                            wsTD.Cells(2, vC + 1).Value = mD(i, 1) & " (PX)"
+                            wsTD.Cells(2, vC + 2).Value = "ER Value"
+                            wsTD.Cells(2, vC + 3).Value = "Check"
+                            wsTD.Range(wsTD.Cells(1, vC), wsTD.Cells(2, vC + 3)).Font.Bold = True
+                            
+                            regEx.Global = True: regEx.Pattern = """t""\s*:\s*""?(\d+)""?\s*,\s*""value""\s*:\s*""([^""]*)"""
+                            Set m = regEx.Execute(iB): vR = 3: mC = 0
+                            
+                            For Each k In m
+                                wsTD.Cells(vR, vC).Value = k.SubMatches(0)
+                                wsTD.Cells(vR, vC + 1).Value = k.SubMatches(1)
                                 
-                                ' Apply lookup comparison if not the key column itself
-                                ' Formula: IF(ABS(LookupValue - ERValue) <= Tolerance, 0, 1)
-                                If InStr(1, mD(i, 1), "PolicyYear", vbTextCompare) = 0 And _
-                                   InStr(1, mD(i, 1), "AttainedAge", vbTextCompare) = 0 Then
+                                ' SPECIAL HANDLING: Start ER Value and Check from Row 4 (vR > 3)
+                                If vR > 3 Then
+                                    ' Pull ER data from index vR-3 because ER starts 1 row lower than PX
+                                    Dim currentER As Variant
+                                    If IsArray(erData) Then
+                                        If (vR - 3) <= UBound(erData, 1) Then currentER = erData(vR - 3, 1)
+                                    Else
+                                        currentER = erData
+                                    End If
                                     
-                                    ' Dynamic Formula based on Age Lookup
-                                    ' R[0]C[-1] is the ER Value, R[0]C[-2] is the PX Value
-                                    wsTD.Cells(vR, vC + 3).FormulaR1C1 = _
-                                        "=IF(ABS(VLOOKUP(RC[-1], C" & vC & ":C" & vC + 1 & ", 2, 0) - RC[-1])<=" & tol & ", 0, 1)"
-                                Else
-                                    ' Simple check for the Age/Year columns themselves
-                                    wsTD.Cells(vR, vC + 3).FormulaR1C1 = "=IF(ABS(RC[-2]-RC[-1])<=" & tol & ", 0, 1)"
-                                End If
-                                
-                                If wsTD.Cells(vR, vC + 3).Value = 1 Then 
-                                    wsTD.Cells(vR, vC + 3).Font.Color = vbRed: mC = mC + 1
+                                    wsTD.Cells(vR, vC + 2).Value = currentER
+                                    
+                                    ' Comparison logic only for these shifted rows
+                                    If IsNumeric(k.SubMatches(1)) And IsNumeric(currentER) Then
+                                        If Abs(CDbl(k.SubMatches(1)) - CDbl(currentER)) <= tol Then
+                                            wsTD.Cells(vR, vC + 3).Value = 0
+                                        Else
+                                            wsTD.Cells(vR, vC + 3).Value = 1
+                                            wsTD.Cells(vR, vC + 3).Font.Color = vbRed: mC = mC + 1
+                                        End If
+                                    End If
                                 End If
                                 vR = vR + 1
-                            Next rowIdx
-                            
+                            Next k
                             wsR.Cells(tcR, i + 4).Value = mC
                             vC = vC + 5: Exit For
                         End If
